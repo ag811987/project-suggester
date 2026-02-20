@@ -1,0 +1,97 @@
+[tool.poetry]
+name = "research-pivot-advisor-backend"
+version = "0.1.0"
+description = "Research Pivot Advisor System - Backend API for analyzing research novelty and suggesting pivots"
+authors = ["Research Advisor Team"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.109.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+sqlalchemy = {extras = ["asyncio"], version = "^2.0"}
+asyncpg = "^0.29.0"
+alembic = "^1.13.0"
+redis = "^5.0"
+openai = "^1.10.0"
+pyalex = "^0.13"
+httpx = "^0.28.0"
+beautifulsoup4 = "^4.12.0"
+lxml = "^5.1.0"
+pypdf = "^4.0.0"
+python-docx = "^1.1.0"
+python-multipart = "^0.0.6"
+apscheduler = "^3.10.0"
+pydantic-settings = "^2.1.0"
+python-dotenv = "^1.0.0"
+loguru = "^0.7.0"
+greenlet = "^3.3.1"
+pgvector = "^0.4.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.2"
+pytest-asyncio = ">=0.25.0"
+pytest-mock = "^3.12.0"
+pytest-httpx = ">=0.34.0"
+pytest-cov = ">=4.0.0"
+ruff = "^0.2.0"
+mypy = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__ files
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --strict-markers"
+markers = [
+    "evaluation: evaluation/benchmark tests (can be slow)",
+    "slow: slow tests (skip in fast CI)",
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pyalex.*",
+    "apscheduler.*",
+    "redis.*",
+]
+ignore_missing_imports = true

@@ -1,0 +1,56 @@
+[
+  {
+    "id": "solved_1",
+    "research_question": "What is the structure of DNA?",
+    "expected_verdict": "SOLVED",
+    "expected_impact": "HIGH",
+    "notes": "Classic solved problem"
+  },
+  {
+    "id": "solved_2",
+    "research_question": "How does photosynthesis convert light to chemical energy?",
+    "expected_verdict": "SOLVED",
+    "expected_impact": "HIGH",
+    "notes": "Well-established biological process"
+  },
+  {
+    "id": "novel_1",
+    "research_question": "Can CRISPR be used to edit mitochondrial DNA in vivo?",
+    "expected_verdict": "NOVEL",
+    "expected_impact": "HIGH",
+    "notes": "Emerging, partially addressed"
+  },
+  {
+    "id": "novel_2",
+    "research_question": "How can quantum error correction scale to fault-tolerant quantum computers with 1000+ qubits?",
+    "expected_verdict": "NOVEL",
+    "expected_impact": "HIGH",
+    "notes": "Active research frontier"
+  },
+  {
+    "id": "marginal_1",
+    "research_question": "Incremental improvement of gradient descent for image classification",
+    "expected_verdict": "MARGINAL",
+    "expected_impact": "LOW",
+    "notes": "Saturated area"
+  },
+  {
+    "id": "marginal_2",
+    "research_question": "Minor variations of transformer architecture for NLP tasks",
+    "expected_verdict": "MARGINAL",
+    "expected_impact": "MEDIUM",
+    "notes": "Heavily explored"
+  },
+  {
+    "id": "uncertain_1",
+    "research_question": "Novel applications of blockchain in supply chain traceability for perishable goods",
+    "expected_verdict": "UNCERTAIN",
+    "notes": "Mixed literature, domain-dependent"
+  },
+  {
+    "id": "uncertain_2",
+    "research_question": "Cross-cultural effects of remote work on team productivity",
+    "expected_verdict": "UNCERTAIN",
+    "notes": "Emerging post-pandemic topic"
+  }
+]

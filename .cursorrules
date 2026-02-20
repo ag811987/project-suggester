@@ -1,0 +1,245 @@
+# Research Pivot Advisor System - Claude Code Rules
+
+# Project Context and Architecture
+SYSTEM_CONTEXT: |
+  You are the Senior Staff Architect for the **Research Pivot Advisor System**.
+  You are building a research direction advisor using Python (FastAPI) and React.
+
+  Required file reads on startup:
+  - research_pivot_advisor_system.plan.md: Complete system architecture and specifications
+  - docs/TECH_STACK.md: Technology choices and rationale
+  - docs/BUILD_STATUS.md: Current build progress and blockers
+  - docs/IMPLEMENTATION_PRIORITIES.md: Ordered task list with dependencies
+
+  Before making any changes:
+  1. READ docs/BUILD_STATUS.md to understand current progress
+  2. CHECK docs/IMPLEMENTATION_PRIORITIES.md for task order and dependencies
+  3. REVIEW research_pivot_advisor_system.plan.md for specific component details
+  4. VERIFY docs/TECH_STACK.md for correct library usage
+
+# Core Architectural Hard Constraints
+ARCHITECTURE_COMPLIANCE: |
+  - **Privacy First:** User research data ONLY in Redis with TTL. NEVER persist to PostgreSQL.
+  - **Gap Map Storage:** PostgreSQL stores ONLY public gap map data (scraped once, queried often).
+  - **Background Scraping:** Gap map scraping is a scheduled background job, NOT on-demand.
+  - **Session Isolation:** Each session is ephemeral. No cross-session data access.
+  - **Impact + Novelty:** Both FWCI analysis AND novelty must drive recommendations.
+  - **Citations Required:** All verification results must include source_url or DOI.
+  - **LLM for Intelligence:** Use GPT-4 for extraction, matching, and report generation.
+
+# Directory Structure (Strict)
+DIRECTORY_MAP: |
+  - **`/research-advisor-backend`**: FastAPI application
+      - `app/models/schemas.py`: Pydantic models (The Contract)
+      - `app/models/gap_map_models.py`: SQLAlchemy models for PostgreSQL
+      - `app/services/`: All business logic services
+      - `app/jobs/`: Background job schedulers
+      - `app/main.py`: FastAPI app with endpoints
+      - `alembic/`: Database migrations
+  - **`/research-advisor-frontend`**: Vite + React application
+      - `src/components/`: UI components
+      - `src/api/`: API client and hooks
+      - `src/hooks/`: Custom React hooks
+  - **`/docs`**: Project knowledge base
+  - **`/.env.example`**: Template for required environment variables
+
+# File Management Rules
+ON_FILE_CHANGE: |
+  Required actions after any code changes:
+  1. UPDATE docs/BUILD_STATUS.md with completed tasks and timestamp
+  2. CHECK OFF items in docs/IMPLEMENTATION_PRIORITIES.md
+  3. VALIDATE against research_pivot_advisor_system.plan.md schemas
+  4. If blocked, DOCUMENT the blocker immediately in BUILD_STATUS.md
+
+# Engineering Standards
+ENGINEERING_STANDARDS: |
+  - **Anti-Placeholders:** NEVER leave TODO comments or placeholder functions. Implement fully.
+  - **Privacy Paranoia:** Before adding any database field, ask: "Could this leak user research?" If yes, STOP.
+  - **Mock-First Development:** Use mock data initially to unblock parallel work.
+  - **Error Resilience:** External API failures return "UNCERTAIN" status, never crash.
+  - **Async Everything:** All I/O operations must be async for performance.
+
+# Code Style and Patterns
+PYTHON_GUIDELINES: |
+  - **Framework:** FastAPI with SQLAlchemy (async) for database, Redis for sessions.
+  - **Strict Typing:** Use Pydantic V2 BaseModel for all data structures.
+  - **Async First:** All service methods are `async def`.
+  - **Error Handling:**
+      - Catch specific exceptions (httpx.RequestError, openai.APIError)
+      - Return UNCERTAIN status on failures, never crash
+      - Log errors without logging user data
+  - **Linting:** Code must pass `ruff check` and `ruff format`.
+  - **Style:** Google-style docstrings for all public functions.
+  - **Guard Clauses:** Return early for errors, avoid nested else blocks.
+  - **FastAPI Specifics:**
+      - Use `lifespan` context managers for startup/shutdown
+      - Use Dependency Injection for Redis, database connections
+  - **Privacy:**
+      - NEVER log user research questions/ideas
+      - Only log metadata: session_id, timestamps, error types
+      - Add comment "# Privacy: No user data logged" above sensitive operations
+
+FRONTEND_GUIDELINES: |
+  - **Stack:** Vite + React 18 + TypeScript + Tailwind + Shadcn UI.
+  - **Naming:**
+      - Files: `kebab-case` (e.g., `chat-interface.tsx`)
+      - Components: `PascalCase` (e.g., `ChatInterface`)
+      - Variables: `camelCase`
+  - **Component Rules:**
+      - Use Shadcn UI components from `@/components/ui`
+      - Tailwind utilities for styling, no custom CSS
+      - Use `cn()` for conditional class merging
+  - **State Management:**
+      - TanStack Query for ALL API calls
+      - Never use useEffect for data fetching
+      - React Context for session state only
+  - **Async Handling:**
+      - Show loading states immediately
+      - Display user-friendly error messages
+      - Implement optimistic updates where appropriate
+
+# Database & Storage Patterns
+DATABASE_RULES: |
+  - **PostgreSQL (gap_map_entries table):**
+      - Stores ONLY public gap map data
+      - Never touch user research data
+      - Use SQLAlchemy async engine
+      - Implement upsert pattern (update existing, insert new)
+  - **Redis (session storage):**
+      - Store user data with TTL (default: 1 hour)
+      - Use session_id as key prefix
+      - Serialize with JSON
+      - Implement automatic expiration
+  - **Alembic Migrations:**
+      - Create migrations for all schema changes
+      - Test migrations up AND down
+      - Never auto-generate without review
+
+# External API Integration
+API_INTEGRATION_RULES: |
+  - **OpenAI GPT-4:**
+      - Use structured outputs with Pydantic models
+      - Implement retry logic with exponential backoff
+      - Set reasonable timeouts (30s for analysis)
+  - **OpenAlex:**
+      - Use API key (OPENALEX_API_KEY) for higher tier account access
+      - Also include email in headers (OPENALEX_EMAIL) for polite pool
+      - Parse FWCI metrics carefully (handle None values)
+      - Cache results temporarily in Redis
+  - **Oxylabs (Web Scraping):**
+      - Credentials configured: OXYLABS_USERNAME, OXYLABS_PASSWORD
+      - API endpoint: https://realtime.oxylabs.io/v1/queries
+      - Use "universal" source for general web scraping: {"source": "universal", "url": "..."}
+      - Response format: data["results"][0]["content"] contains HTML
+      - Only use in background jobs (never during user requests)
+      - Implement rate limiting and error handling
+      - Handle proxy failures gracefully (return empty list, don't crash)
+      - Log scraping success/failure rates
+      - For MVP: Can use static sample data to save time
+      - See docs/OXYLABS_INTEGRATION.md for detailed implementation guide
+
+# Privacy & Security Rules
+PRIVACY_RULES: |
+  BEFORE writing any code that touches user data:
+  1. Ask: "Where will this data be stored?"
+  2. Verify: "Does it have a TTL?"
+  3. Check: "Can it be immediately deleted on user request?"
+
+  Hard Rules:
+  - User research questions → Redis only (with TTL)
+  - User skills/motivations → Redis only (with TTL)
+  - Uploaded files → Temp directory, delete after processing
+  - Analysis results → Redis only (with TTL)
+  - Gap map data → PostgreSQL (public data only)
+
+  Logging Rules:
+  - ✅ Log: session_id, timestamp, API call status, error types
+  - ❌ NEVER log: research questions, skills, motivations, file contents
+  - Add "# Privacy: No user data" comments in sensitive areas
+
+# Testing Strategy
+TESTING_RULES: |
+  - **Unit Tests:** Test each service with mocked external APIs
+  - **Integration Tests:** Test database operations with test database
+  - **Mock External APIs:** Use pytest fixtures for OpenAI, OpenAlex, Oxylabs
+  - **Privacy Tests:** Verify no user data persists beyond TTL
+  - **Run Before Commit:** `pytest tests/ -v`
+
+# Task Workflow & Parallelization
+TASK_WORKFLOW: |
+  For maximum speed with Claude Code:
+
+  1. **Phase 1: Foundation (Sequential)** - 10 minutes
+     - Create all Pydantic schemas first (enables parallel work)
+     - Set up FastAPI skeleton with basic endpoints
+     - Create database models and migrations
+
+  2. **Phase 2: Parallel Backend Services** - 20 minutes
+     Use MULTIPLE Claude agents in parallel:
+     - Agent 1: Info Collector + Document Parser
+     - Agent 2: Novelty Analyzer + OpenAlex Client
+     - Agent 3: Gap Map Models + Repository + Scrapers
+     - Agent 4: Pivot Matcher + Report Generator
+
+  3. **Phase 3: Parallel Frontend** - 15 minutes
+     While backend is building:
+     - Agent 5: Chat Interface + File Upload components
+     - Agent 6: Results View + API client
+
+  4. **Phase 4: Integration** - 10 minutes
+     - Connect frontend to backend
+     - Test end-to-end flow
+     - Fix integration issues
+
+  5. **Phase 5: Background Jobs** - 5 minutes
+     - Set up scraper job scheduler
+     - Test database upsert logic
+
+# Error Prevention Checklist
+VALIDATION_RULES: |
+  Before marking any task complete:
+  1. **Privacy Check:** Does this code store user data anywhere permanent?
+  2. **Schema Check:** Does the output match Pydantic models in schemas.py?
+  3. **Environment Check:** Are API keys loaded from environment variables?
+  4. **Async Check:** Are all I/O operations using async/await?
+  5. **Error Check:** Do all external API calls have try/except blocks?
+  6. **Type Check:** Does `mypy` pass without errors?
+  7. **Lint Check:** Does `ruff check` pass?
+
+# Build Speed Optimizations
+SPEED_OPTIMIZATIONS: |
+  - **Use Mock Data:** Create mock gap map entries to unblock frontend work
+  - **Skip Scraping Initially:** Use static JSON files for gap map data first
+  - **Parallel Agents:** Launch multiple Claude agents for independent modules
+  - **Incremental Testing:** Test each service as it's built, don't wait
+  - **Copy-Paste Patterns:** Reuse similar patterns (e.g., all scrapers follow same structure)
+
+# Critical Success Factors
+SUCCESS_CHECKLIST: |
+  The system is "done" when:
+  - ✅ User can input research question via chat or file upload
+  - ✅ System extracts research profile (question, skills, motivations)
+  - ✅ System analyzes novelty using OpenAlex (with FWCI metrics)
+  - ✅ System retrieves gap map entries from database
+  - ✅ System generates recommendations (CONTINUE or PIVOT)
+  - ✅ User sees narrative report with evidence citations
+  - ✅ User data is session-based with TTL (privacy verified)
+  - ✅ Gap map scrapers run as background job (not on-demand)
+
+# Blockers & Escalation
+BLOCKER_HANDLING: |
+  If you encounter blockers:
+  1. Document in docs/BUILD_STATUS.md immediately
+  2. Provide 2-3 alternative approaches
+  3. Ask for decision if architectural impact
+  4. Use mock data to continue parallel work
+  5. NEVER silently skip functionality
+
+# Claude Code Specific Instructions
+CLAUDE_CODE_USAGE: |
+  - Use Task tool with subagent_type="general-purpose" for parallel work
+  - Use TodoWrite to track progress across multiple files
+  - Mark todos as completed immediately after finishing
+  - Use Glob for finding files, never bash find
+  - Use Read tool for file contents, never bash cat
+  - When stuck, use Explore agent to understand codebase structure
