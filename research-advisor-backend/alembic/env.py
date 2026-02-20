@@ -1,6 +1,10 @@
 """Alembic environment configuration for async SQLAlchemy."""
 
 import asyncio
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -11,9 +15,17 @@ from alembic import context
 
 from app.models.gap_map_models import Base
 
+# Load .env from project root so DATABASE_URL is available
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Use DATABASE_URL from environment (e.g. from .env) when set; else use alembic.ini
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:
