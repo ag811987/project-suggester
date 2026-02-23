@@ -1,6 +1,8 @@
 """FastAPI application entry point for the Research Pivot Advisor System."""
 
+import json
 import logging
+import time
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
@@ -16,6 +18,27 @@ from app.services.gap_map_repository import GapMapRepository
 from app.services.gap_map_scraper import GapMapScraperOrchestrator
 
 logger = logging.getLogger(__name__)
+
+_DEBUG_LOG_PATH = "/Users/amit/Coding-Projects/Project-Suggester/.cursor/debug.log"
+
+
+def _debug_log(*, location: str, message: str, data: dict, run_id: str, hypothesis_id: str) -> None:
+    # region agent log
+    payload = {
+        "id": f"log_{time.time_ns()}",
+        "timestamp": int(time.time() * 1000),
+        "location": location,
+        "message": message,
+        "data": data,
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+    }
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 @asynccontextmanager
@@ -52,6 +75,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not seed gap map database (table may not exist yet): %s", e)
 
+    _debug_log(
+        location="app/main.py:lifespan",
+        message="Startup settings snapshot (non-sensitive)",
+        data={"cors_origins": settings.cors_origins, "api_v1_prefix": settings.api_v1_prefix},
+        run_id="post-fix",
+        hypothesis_id="H1_CORS",
+    )
+
     logger.info("Application started")
     yield
 
@@ -72,13 +103,43 @@ def create_app() -> FastAPI:
     )
 
     # CORS middleware
+    allow_origin_regex = r"^http://localhost:\d+$" if settings.environment == "development" else None
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
+        allow_origin_regex=allow_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def debug_cors_middleware(request: Request, call_next):
+        origin = request.headers.get("origin")
+        if origin:
+            _debug_log(
+                location="app/main.py:debug_cors_middleware:in",
+                message="Incoming request (CORS)",
+                data={"origin": origin, "path": request.url.path, "method": request.method},
+                run_id="post-fix",
+                hypothesis_id="H1_CORS",
+            )
+        response = await call_next(request)
+        if origin:
+            _debug_log(
+                location="app/main.py:debug_cors_middleware:out",
+                message="Outgoing response (CORS)",
+                data={
+                    "origin": origin,
+                    "path": request.url.path,
+                    "method": request.method,
+                    "status": response.status_code,
+                    "acao": response.headers.get("access-control-allow-origin"),
+                },
+                run_id="post-fix",
+                hypothesis_id="H1_CORS",
+            )
+        return response
 
     # Global exception handler
     @app.exception_handler(Exception)

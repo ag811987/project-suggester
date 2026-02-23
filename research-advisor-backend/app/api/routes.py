@@ -4,11 +4,14 @@ import io
 import json
 import uuid
 import logging
+import time
+import os
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.debug_log import debug_log
 from app.models.schemas import (
     AnalyzeResponse,
     ChatMessage,
@@ -42,6 +45,21 @@ async def analyze(
     Returns a session_id and the completed recommendation.
     """
     settings = get_settings()
+    debug_log(
+        location="app/api/routes.py:analyze:start",
+        message="Analyze request start (non-sensitive snapshot)",
+        data={
+            "has_openai_api_key_env": bool(os.getenv("OPENAI_API_KEY")),
+            "has_openai_api_key_settings": bool(getattr(settings, "openai_api_key", None)),
+            "redis_url": settings.redis_url,
+            "database_url_prefix": settings.database_url.split("@", 1)[0].split("://", 1)[0]
+            if getattr(settings, "database_url", None)
+            else None,
+            "files_count": len(files),
+        },
+        run_id="pre-fix",
+        hypothesis_id="H0_ANALYZE_ENTRY",
+    )
 
     # Parse messages JSON
     try:
@@ -91,10 +109,44 @@ async def analyze(
         openalex_api_key=settings.openalex_api_key,
         openai_model=settings.openai_model,
         use_semantic_search=settings.openalex_use_semantic_search,
+        semantic_budget_threshold=settings.openalex_semantic_budget_threshold,
+        multi_query=settings.openalex_multi_query,
+        queries_per_variant=settings.openalex_queries_per_variant,
+        use_embedding_rerank=settings.openalex_use_embedding_rerank,
+        fwci_high_threshold=settings.fwci_high_threshold,
+        fwci_low_threshold=settings.fwci_low_threshold,
+        search_limit=settings.openalex_search_limit,
     )
     novelty = await novelty_analyzer.analyze(
         merged_profile.research_question, profile=merged_profile
     )
+    # Privacy: No user data logged
+    try:
+        with open(
+            "/Users/amit/Coding-Projects/Project-Suggester/.cursor/debug.log",
+            "a",
+            encoding="utf-8",
+        ) as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": f"log_{time.time_ns()}",
+                        "timestamp": int(time.time() * 1000),
+                        "location": "app/api/routes.py:analyze:novelty_result",
+                        "message": "NoveltyAnalyzer result summary",
+                        "data": {
+                            "related_papers_count": novelty.related_papers_count,
+                            "verdict": novelty.verdict,
+                            "impact_assessment": novelty.impact_assessment,
+                        },
+                        "runId": "post-fix",
+                        "hypothesisId": "H_OA_RESULT_MISMATCH",
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
 
     # 4. Get gap map entries via vector retrieval (or fallback to get_all)
     gap_entries: list[GapMapEntry] = []
@@ -110,6 +162,13 @@ async def analyze(
             )
     except Exception as e:
         logger.warning("Failed to fetch gap map entries: %s", e)
+        debug_log(
+            location="app/api/routes.py:analyze:gap_retrieval_error",
+            message="Gap retrieval failed (exception only)",
+            data={"exc_type": type(e).__name__},
+            run_id="pre-fix",
+            hypothesis_id="H3_DB_OR_VECTOR_RETRIEVAL",
+        )
 
     # 5. Match pivots
     pivot_matcher = PivotMatcher()
@@ -131,11 +190,22 @@ async def analyze(
         "recommendation": recommendation.model_dump_json(),
         "profile": merged_profile.model_dump_json(),
     }
-    await redis.set(
-        f"session:{session_id}",
-        json.dumps(session_data),
-        ex=settings.session_ttl_seconds,
-    )
+    try:
+        await redis.set(
+            f"session:{session_id}",
+            json.dumps(session_data),
+            ex=settings.session_ttl_seconds,
+        )
+    except Exception as e:
+        # Privacy: No user data logged
+        debug_log(
+            location="app/api/routes.py:analyze:redis_set_error",
+            message="Redis session write failed (exception only)",
+            data={"exc_type": type(e).__name__, "redis_url": settings.redis_url},
+            run_id="pre-fix",
+            hypothesis_id="H1_REDIS_UNAVAILABLE",
+        )
+        raise
 
     return AnalyzeResponse(session_id=session_id, status="completed")
 

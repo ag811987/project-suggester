@@ -14,6 +14,7 @@ interface ChatInterfaceProps {
   isLoading?: boolean
   disabled?: boolean
   placeholder?: string
+  showIntro?: boolean
 }
 
 const ACCEPTED_TYPES: Record<string, string> = {
@@ -37,6 +38,7 @@ export function ChatInterface({
   isLoading = false,
   disabled = false,
   placeholder = 'Type your response...',
+  showIntro = false,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState('')
   const [attachedFiles, setAttachedFiles] = useState<File[]>([])
@@ -121,6 +123,11 @@ export function ChatInterface({
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-3xl space-y-6">
+          {showIntro && (
+            <p className="text-center text-sm text-slate-500">
+              We&apos;ll ask 3 quick questions to understand your research.
+            </p>
+          )}
           {messages.map((message) => (
             <div
               key={message.id}

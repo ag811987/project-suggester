@@ -83,6 +83,28 @@ class GapMapEntry(Base):
         comment="OpenAI text-embedding-3-small vector for semantic search"
     )
 
+    # OpenAlex topic taxonomy (Topic → Subfield → Field → Domain)
+    openalex_topic = Column(
+        String,
+        nullable=True,
+        comment="OpenAlex topic classification (most specific, ~4,500 topics)"
+    )
+    openalex_subfield = Column(
+        String,
+        nullable=True,
+        comment="OpenAlex subfield classification (~250 subfields)"
+    )
+    openalex_field = Column(
+        String,
+        nullable=True,
+        comment="OpenAlex field classification (~20 fields)"
+    )
+    openalex_domain = Column(
+        String,
+        nullable=True,
+        comment="OpenAlex domain classification (4 domains)"
+    )
+
     # Indexes for efficient querying
     __table_args__ = (
         Index('idx_source', 'source'),
@@ -90,6 +112,9 @@ class GapMapEntry(Base):
         Index('idx_scraped_at', 'scraped_at'),
         # Composite index for common query patterns
         Index('idx_source_category', 'source', 'category'),
+        # OpenAlex taxonomy indexes
+        Index('idx_openalex_field', 'openalex_field'),
+        Index('idx_openalex_domain', 'openalex_domain'),
     )
 
     def __repr__(self) -> str:
@@ -111,5 +136,9 @@ class GapMapEntry(Base):
             source=self.source,  # type: ignore
             source_url=self.source_url,
             category=self.category,
-            tags=self.tags or []
+            tags=self.tags or [],
+            openalex_topic=self.openalex_topic,
+            openalex_subfield=self.openalex_subfield,
+            openalex_field=self.openalex_field,
+            openalex_domain=self.openalex_domain,
         )

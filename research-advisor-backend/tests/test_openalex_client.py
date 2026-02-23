@@ -181,6 +181,24 @@ class TestSearchPapers:
         assert papers == []
 
 
+class TestSearchPapersTitleAbstract:
+    """Tests for title_and_abstract search (more targeted for niche topics)."""
+
+    @pytest.mark.asyncio
+    async def test_search_title_abstract_returns_papers(self, client, mock_openalex_papers):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_openalex_papers
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(client, "_http_client") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_response)
+            papers = await client.search_papers_title_abstract("Psittacula parakeet speciation")
+
+        assert len(papers) == 3
+        assert papers[0]["title"] == "Paper One"
+
+
 class TestFWCIExtraction:
     """Tests for FWCI extraction and None handling."""
 
@@ -297,8 +315,8 @@ class TestCalculateFWCIStats:
              "cited_by_percentile_year_min": 35, "cited_by_percentile_year_max": 52},
         ]
         stats = client.calculate_fwci_stats(papers)
-
-        assert stats["average_fwci"] == pytest.approx(1.7, abs=0.01)
+        # Median of [2.5, 1.8, 0.8] = 1.8
+        assert stats["average_fwci"] == pytest.approx(1.8, abs=0.01)
         assert stats["papers_with_fwci"] == 3
         assert stats["citation_percentile_min"] == 35
         assert stats["citation_percentile_max"] == 95
@@ -330,6 +348,18 @@ class TestCalculateFWCIStats:
 
         assert stats["average_fwci"] is None
         assert stats["papers_with_fwci"] == 0
+
+    def test_calculate_stats_uses_median_not_mean(self, client):
+        """Median is used to avoid outlier inflation from tangentially related classics."""
+        papers = [
+            {"fwci": 56.0, "citation_normalized_percentile": 0.99},
+            {"fwci": 2.0, "citation_normalized_percentile": 0.5},
+            {"fwci": 3.0, "citation_normalized_percentile": 0.55},
+        ]
+        stats = client.calculate_fwci_stats(papers)
+        # Median of [56, 2, 3] = 3.0 (not mean 20.3)
+        assert stats["average_fwci"] == pytest.approx(3.0)
+        assert stats["papers_with_fwci"] == 3
         assert stats["citation_percentile_min"] is None
         assert stats["citation_percentile_max"] is None
 
@@ -394,3 +424,43 @@ class TestPaperEnrichment:
         assert p["abstract"] == "Background We study"
         assert p["concepts"] == [("Machine learning", 0.9), ("Neural networks", 0.7)]
         assert p["keywords"] == [("deep learning", 0.85), ("AI", 0.6)]
+
+
+class TestGetRemainingBudgetUsd:
+    """Tests for get_remaining_budget_usd."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_without_api_key(self):
+        client = OpenAlexClient(email="test@example.com", api_key=None)
+        result = await client.get_remaining_budget_usd()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_remaining_budget_with_api_key(self):
+        client = OpenAlexClient(email="test@example.com", api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "rate_limit": {
+                "daily_remaining_usd": 0.95,
+                "daily_budget_usd": 1.0,
+            }
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(client, "_http_client") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_response)
+            result = await client.get_remaining_budget_usd()
+
+        assert result == 0.95
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_api_error(self):
+        client = OpenAlexClient(email="test@example.com", api_key="test-key")
+        with patch.object(client, "_http_client") as mock_http:
+            mock_http.get = AsyncMock(
+                side_effect=httpx.HTTPStatusError("500", request=MagicMock(), response=MagicMock())
+            )
+            result = await client.get_remaining_budget_usd()
+
+        assert result is None

@@ -2,11 +2,15 @@
 
 import logging
 
+from openai import AsyncOpenAI
+
 from app.config import get_settings
 from app.models.schemas import GapMapEntry
 from app.services.embedding_service import EmbeddingService
 from app.services.gap_map_embedder import GapMapEmbedder
 from app.services.gap_map_repository import GapMapRepository
+from app.services.gap_map_topic_enricher import GapMapTopicEnricher
+from app.services.openalex_client import OpenAlexClient
 from app.services.scrapers.convergent_scraper import ConvergentScraper
 from app.services.scrapers.homeworld_scraper import HomeworldScraper
 from app.services.scrapers.wikenigma_scraper import WikienigmaScraper
@@ -74,5 +78,24 @@ class GapMapScraperOrchestrator:
             embedded = await embedder.embed_pending()
             if embedded:
                 logger.info("Embedded %d gap map entries", embedded)
+
+            # Step 3: Enrich entries missing OpenAlex taxonomy
+            openalex_client = OpenAlexClient(
+                email=settings.openalex_email,
+                api_key=settings.openalex_api_key,
+            )
+            try:
+                enricher = GapMapTopicEnricher(
+                    openalex_client=openalex_client,
+                    openai_client=AsyncOpenAI(api_key=settings.openai_api_key),
+                    repository=self.repository,
+                    openai_model=settings.openai_model,
+                )
+                enriched = await enricher.enrich_pending()
+                if enriched:
+                    logger.info("Enriched %d gap map entries with taxonomy", enriched)
+            finally:
+                await openalex_client.close()
+
             return count
         return 0

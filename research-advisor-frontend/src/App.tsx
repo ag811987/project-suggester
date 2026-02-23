@@ -1,8 +1,11 @@
 import { useState, useCallback, useEffect } from 'react'
 import { ChatInterface } from './components/chat-interface'
 import type { ChatMessage } from './components/chat-interface'
+import { LandingHero } from './components/landing-hero'
 import { ResultsView } from './components/results-view'
 import { useAnalyzeResearch, useGetAnalysis } from './hooks/useAnalysis'
+
+type View = 'landing' | 'chat' | 'results'
 
 /**
  * Guided question flow steps:
@@ -27,6 +30,7 @@ const STEP_PLACEHOLDERS: Record<number, string> = {
 }
 
 function App() {
+  const [view, setView] = useState<View>('landing')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [allFiles, setAllFiles] = useState<File[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -37,23 +41,11 @@ function App() {
     sessionId,
   )
 
-  // Send the first assistant question on mount
-  useEffect(() => {
-    if (messages.length === 0 && step === 0) {
-      setMessages([
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: GUIDED_QUESTIONS[0],
-        },
-      ])
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When analysis completes, move to step 4
+  // When analysis completes, move to results view
   useEffect(() => {
     if (recommendation && step === 3) {
       setStep(4)
+      setView('results')
     }
   }, [recommendation, step])
 
@@ -123,8 +115,8 @@ function App() {
     [step, messages, allFiles, analyzeMutation],
   )
 
-  const handleNewAnalysis = () => {
-    setSessionId(null)
+  const handleStart = () => {
+    setView('chat')
     setMessages([
       {
         id: crypto.randomUUID(),
@@ -132,6 +124,13 @@ function App() {
         content: GUIDED_QUESTIONS[0],
       },
     ])
+    setStep(0)
+  }
+
+  const handleNewAnalysis = () => {
+    setView('landing')
+    setSessionId(null)
+    setMessages([])
     setAllFiles([])
     setStep(0)
   }
@@ -139,11 +138,24 @@ function App() {
   const isLoading = analyzeMutation.isPending || step === 3
   const mutationError = analyzeMutation.error
 
-  // Results view — shown in chat-like layout
-  if (step === 4 && recommendation) {
+  // Landing view
+  if (view === 'landing') {
+    return (
+      <div className="flex min-h-screen flex-col bg-gradient-to-b from-slate-50 via-white to-blue-50/20">
+        <header className="flex items-center justify-between border-b border-gray-200/50 bg-white/80 px-6 py-3 backdrop-blur-sm">
+          <h1 className="text-lg font-semibold text-gray-900">
+            Research Pivot Advisor
+          </h1>
+        </header>
+        <LandingHero onStart={handleStart} />
+      </div>
+    )
+  }
+
+  // Results view
+  if (view === 'results' && recommendation) {
     return (
       <div className="flex h-screen flex-col bg-gray-50">
-        {/* Header */}
         <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
           <h1 className="text-lg font-semibold text-gray-900">
             Research Pivot Advisor
@@ -156,7 +168,6 @@ function App() {
           </button>
         </header>
 
-        {/* Results */}
         <div className="flex-1 overflow-y-auto px-4 py-6">
           <div className="mx-auto max-w-3xl">
             <ResultsView data={recommendation} />
@@ -166,9 +177,9 @@ function App() {
     )
   }
 
+  // Chat view
   return (
     <div className="relative flex h-screen flex-col bg-gray-50">
-      {/* Header */}
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
         <h1 className="text-lg font-semibold text-gray-900">
           Research Pivot Advisor
@@ -180,7 +191,6 @@ function App() {
         )}
       </header>
 
-      {/* Errors */}
       {(mutationError || analysisError) && (
         <div className="mx-auto mt-3 w-full max-w-3xl px-4">
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -193,7 +203,6 @@ function App() {
         </div>
       )}
 
-      {/* Chat */}
       <div className="flex-1 overflow-hidden">
         <ChatInterface
           messages={messages}
@@ -201,6 +210,7 @@ function App() {
           isLoading={isLoading}
           disabled={step >= 3}
           placeholder={STEP_PLACEHOLDERS[step] || 'Type your response...'}
+          showIntro={step === 0}
         />
       </div>
     </div>

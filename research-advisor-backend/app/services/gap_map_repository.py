@@ -106,3 +106,31 @@ class GapMapRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def get_entries_without_taxonomy(self, limit: int = 500) -> list[GapMapEntryDB]:
+        """Return gap map entries that have no OpenAlex taxonomy yet."""
+        stmt = (
+            select(GapMapEntryDB)
+            .where(GapMapEntryDB.openalex_topic.is_(None))
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def update_taxonomy(
+        self,
+        entry_id: int,
+        taxonomy: dict,
+    ) -> None:
+        """Update a single entry's OpenAlex taxonomy fields."""
+        stmt = (
+            update(GapMapEntryDB)
+            .where(GapMapEntryDB.id == entry_id)
+            .values(
+                openalex_topic=taxonomy.get("topic"),
+                openalex_subfield=taxonomy.get("subfield"),
+                openalex_field=taxonomy.get("field"),
+                openalex_domain=taxonomy.get("domain"),
+            )
+        )
+        await self.session.execute(stmt)

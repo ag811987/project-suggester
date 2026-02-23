@@ -67,6 +67,38 @@ class ResearchDecomposition(BaseModel):
     )
 
 
+class ResearcherClassification(BaseModel):
+    """
+    Researcher's position in the OpenAlex topic taxonomy.
+
+    Derived from the primary_topic fields of papers returned by OpenAlex
+    for the researcher's question. Used for topic-proximity scoring and
+    field-contextualized impact assessment.
+    """
+    primary_domain: str | None = Field(
+        default=None, description="Dominant domain from related papers (e.g., Life Sciences)"
+    )
+    primary_field: str | None = Field(
+        default=None, description="Dominant field from related papers (e.g., Biology)"
+    )
+    primary_subfield: str | None = Field(
+        default=None, description="Dominant subfield from related papers (e.g., Molecular Biology)"
+    )
+    primary_topic: str | None = Field(
+        default=None, description="Dominant topic from related papers (e.g., CRISPR Gene Editing)"
+    )
+    secondary_topics: list[str] = Field(
+        default_factory=list,
+        description="Other topics appearing in results (for cross-disciplinary researchers)"
+    )
+    topic_diversity: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Unique subfields / total papers — higher means more cross-disciplinary"
+    )
+
+
 class ResearchProfile(BaseModel):
     """
     Structured profile extracted from user input.
@@ -184,6 +216,12 @@ class NoveltyAssessment(BaseModel):
         description="Decomposition of the research problem used for analysis"
     )
 
+    # OpenAlex topic taxonomy classification of the researcher
+    researcher_classification: ResearcherClassification | None = Field(
+        default=None,
+        description="Researcher's position in the OpenAlex topic taxonomy (derived from related papers)"
+    )
+
 
 class GapMapEntry(BaseModel):
     """
@@ -200,6 +238,19 @@ class GapMapEntry(BaseModel):
     tags: list[str] = Field(
         default_factory=list,
         description="Tags or keywords associated with this gap"
+    )
+    # OpenAlex topic taxonomy (populated by batch enrichment pipeline)
+    openalex_topic: str | None = Field(
+        default=None, description="OpenAlex topic (most specific, ~4,500 topics)"
+    )
+    openalex_subfield: str | None = Field(
+        default=None, description="OpenAlex subfield (~250 subfields)"
+    )
+    openalex_field: str | None = Field(
+        default=None, description="OpenAlex field (~20 fields)"
+    )
+    openalex_domain: str | None = Field(
+        default=None, description="OpenAlex domain (4 domains)"
     )
 
 
@@ -244,6 +295,10 @@ class ReportSections(BaseModel):
     impact_section: str = Field(
         ...,
         description="Markdown section analyzing the expected impact of this research"
+    )
+    real_world_impact_section: str = Field(
+        default="",
+        description="Markdown section on real-world impact: how the world changes, downstream consequences, justification vs gap map problems"
     )
     pivot_section: str = Field(
         default="",

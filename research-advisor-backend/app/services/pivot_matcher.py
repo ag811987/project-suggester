@@ -7,14 +7,17 @@ ranking by relevance × impact potential.
 
 import json
 import logging
+import os
 
 from openai import AsyncOpenAI
 
+from app.debug_log import debug_log
 from app.models.schemas import (
     GapMapEntry,
     ImpactLevel,
     NoveltyAssessment,
     PivotSuggestion,
+    ResearcherClassification,
     ResearchProfile,
 )
 
@@ -38,6 +41,13 @@ class PivotMatcher:
     async def _call_llm(self, prompt: str) -> str:
         """Call the LLM with a prompt and return the response content."""
         if self._client is None:
+            debug_log(
+                location="app/services/pivot_matcher.py:PivotMatcher:_call_llm:init_client",
+                message="Initializing OpenAI client for pivot matcher",
+                data={"has_openai_api_key_env": bool(os.getenv("OPENAI_API_KEY"))},
+                run_id="pre-fix",
+                hypothesis_id="H2_OPENAI_KEY_NOT_WIRED",
+            )
             self._client = AsyncOpenAI()
 
         response = await self._client.chat.completions.create(
@@ -78,6 +88,13 @@ class PivotMatcher:
             llm_response = await self._call_llm(prompt)
             return self._parse_response(llm_response, gap_entries, top_n)
         except Exception:
+            debug_log(
+                location="app/services/pivot_matcher.py:PivotMatcher:match_pivots:exception",
+                message="Pivot matcher failed (exception only)",
+                data={"has_openai_api_key_env": bool(os.getenv("OPENAI_API_KEY"))},
+                run_id="pre-fix",
+                hypothesis_id="H2_OPENAI_KEY_NOT_WIRED",
+            )
             logger.exception("Error in pivot matching")
             return []
 
@@ -87,16 +104,47 @@ class PivotMatcher:
         novelty: NoveltyAssessment,
         gap_entries: list[GapMapEntry],
     ) -> str:
-        """Build the LLM prompt for pivot matching."""
-        gaps_text = "\n".join(
-            f"  [{i}] Title: {g.title}\n"
-            f"      Description: {g.description}\n"
-            f"      Category: {g.category or 'N/A'}\n"
-            f"      Tags: {', '.join(g.tags) if g.tags else 'N/A'}"
-            for i, g in enumerate(gap_entries)
-        )
+        """Build the LLM prompt for pivot matching.
 
-        return f"""You are a research strategist. Analyze the researcher's profile and match them to research gap opportunities, considering both scholarly and practical impact potential.
+        Includes the researcher's OpenAlex field classification and each gap's
+        taxonomy so the LLM can reason about pivot distance.
+        """
+        # Format each gap with its OpenAlex taxonomy when available
+        gap_lines = []
+        for i, g in enumerate(gap_entries):
+            taxonomy_line = ""
+            if g.openalex_domain or g.openalex_field:
+                parts = [
+                    g.openalex_domain or "?",
+                    g.openalex_field or "?",
+                    g.openalex_subfield or "?",
+                    g.openalex_topic or "?",
+                ]
+                taxonomy_line = f"\n      OpenAlex: {' > '.join(parts)}"
+
+            gap_lines.append(
+                f"  [{i}] Title: {g.title}\n"
+                f"      Description: {g.description}\n"
+                f"      Category: {g.category or 'N/A'}\n"
+                f"      Tags: {', '.join(g.tags) if g.tags else 'N/A'}"
+                f"{taxonomy_line}"
+            )
+        gaps_text = "\n".join(gap_lines)
+
+        # Build researcher's field position from classification
+        classification = novelty.researcher_classification
+        field_position = ""
+        if classification and (classification.primary_domain or classification.primary_field):
+            field_position = f"""
+RESEARCHER'S FIELD POSITION (from OpenAlex topic taxonomy):
+- Domain: {classification.primary_domain or 'Unknown'}
+- Field: {classification.primary_field or 'Unknown'}
+- Subfield: {classification.primary_subfield or 'Unknown'}
+- Topic: {classification.primary_topic or 'Unknown'}
+
+Use this to assess pivot distance: gaps in the same field are near pivots (lower risk, more skill transfer), while gaps in different domains are bold pivots (higher risk, more novel)."""
+
+        return f"""You are a research strategist. Analyze the researcher's profile and match them to research gap opportunities. Prioritize gaps where the researcher's skills would be put to BETTER use—not just higher impact score, but problems that justify their expertise and have meaningful beneficiaries. Avoid recommending niche/low-significance pivots (e.g., speciating a particular species) unless the researcher explicitly seeks that.
 
 RESEARCHER PROFILE:
 - Research Question: {profile.research_question}
@@ -104,6 +152,7 @@ RESEARCHER PROFILE:
 - Expertise Areas: {', '.join(profile.expertise_areas) if profile.expertise_areas else 'Not specified'}
 - Motivations: {', '.join(profile.motivations) if profile.motivations else 'Not specified'}
 - Interests: {', '.join(profile.interests) if profile.interests else 'Not specified'}
+{field_position}
 
 CURRENT RESEARCH NOVELTY:
 - Verdict: {novelty.verdict}
@@ -116,10 +165,10 @@ AVAILABLE RESEARCH GAPS:
 For each gap that could be a good match, return a JSON array of objects with:
 - "gap_index": integer index from the list above
 - "relevance_score": float 0.0-1.0 (how well researcher's skills match this gap)
-- "impact_potential": "HIGH", "MEDIUM", or "LOW"
-- "match_reasoning": why this gap matches the researcher's skills and motivations
+- "impact_potential": "HIGH", "MEDIUM", or "LOW" — be skeptical: avoid over-scoring niche problems. HIGH = meaningful beneficiaries, justifies expertise.
+- "match_reasoning": why this gap matches the researcher's skills and motivations. Note the pivot distance (near/adjacent/bold) based on the OpenAlex taxonomy.
 - "feasibility_for_researcher": CONCRETE guidance on how the researcher can leverage their specific skills ({', '.join(profile.skills) if profile.skills else 'their expertise'}) in this pivot. Be actionable: e.g. "Your X skills would allow you to..." or "Apply your background in Y to..."
-- "impact_rationale": why this problem has higher impact potential than the researcher's current direction
+- "impact_rationale": why this problem is a BETTER use of the researcher's skills than their current direction. Who benefits? Why is this worth their time? Avoid generic praise—be specific.
 
 Return ONLY valid JSON array. No other text."""
 

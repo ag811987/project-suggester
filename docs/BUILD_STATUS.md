@@ -2,7 +2,48 @@
 
 ## Current Status: PHASE 5 COMPLETE ✅ — ALL PHASES DONE
 
-**Last Updated:** 2026-02-11
+**Last Updated:** 2026-02-20
+
+---
+
+## Recent Updates (Multi-Query Search)
+
+**2026-02-20: Additive Multi-Query Search Improvements**
+- **Multi-query keyword:** Run 3-5 query variants (key_concepts OR, core_questions[0], shortened, phrase) in parallel, merge and rank by query_count + relevance_score.
+- **Preserved:** Semantic + keyword hybrid when budget allows; budget fallback to keyword-only.
+- **Fallback when empty:** Full research_question, then ultra-broad (3 concepts OR 3 words).
+- **Optional embedding rerank:** `OPENALEX_USE_EMBEDDING_RERANK` reranks merged papers by cosine similarity.
+- **Config:** `OPENALEX_MULTI_QUERY` (default true), `OPENALEX_QUERIES_PER_VARIANT` (5), `OPENALEX_USE_EMBEDDING_RERANK` (false).
+- **OpenAlexClient:** Added `relevance_score` to normalized papers.
+
+---
+
+## Recent Updates (Relevance Quality Fix)
+
+**2026-02-20: Tighten OpenAlex retrieval to reduce unrelated classics/tools**
+- **Tighter matching:** Multi-query keyword search now uses OpenAlex `title_and_abstract.search` instead of broad `/works?search=...` to reduce famous-but-irrelevant results.
+- **Heuristic rerank:** Added lightweight local relevance filter/rerank (term overlap with specific key concepts) to down-rank generic methods/guidelines when they only match broad terms.
+- **Stability:** Sanitized `title_and_abstract.search` filter query strings to avoid intermittent OpenAlex 400s on punctuation/long titles.
+
+---
+
+## Recent Updates (Hybrid Semantic + Keyword Search)
+
+**2026-02-20: Hybrid Semantic + Keyword Search with Budget Fallback**
+- **Hybrid search:** When budget allows, runs semantic + keyword search in parallel, merges and dedupes by paper ID (semantic results first).
+- **Budget fallback:** When remaining daily API budget < threshold (default $0.05), falls back to keyword-only flow to avoid 429s.
+- **OpenAlexClient:** Added `get_remaining_budget_usd()` using `/rate-limit` endpoint; fixed semantic cost docstring ($0.01/query).
+- **Config:** `OPENALEX_SEMANTIC_BUDGET_THRESHOLD` (default 0.05).
+- **Tests:** `get_remaining_budget_usd`, `_merge_papers`, hybrid vs keyword-only paths.
+
+---
+
+## Recent Updates (Real-World Impact & FWCI Calibration)
+
+**2026-02-20: Real-World Impact Assessment & FWCI Calibration**
+- **Real-World Impact Section:** New report section assessing how the world changes if the question is answered—downstream consequences, future knowledge production, problem solving. Explicit comparison vs. gap map entries (curated high-impact problems). Prompt asks: Is this research justified vis-a-vis our gap maps? Would their skills be better used elsewhere?
+- **FWCI Calibration:** OpenAlex FWCI tends to inflate (~1.5x vs SciVal). Added configurable thresholds: `FWCI_HIGH_THRESHOLD` (default 2.2), `FWCI_LOW_THRESHOLD` (default 1.2). Stricter than raw Snowball (1.5, 0.8) to reduce false HIGH scores. See `docs/FWCI_CALIBRATION.md`.
+- **ReportSections:** Added `real_world_impact_section`. Frontend displays new section when present.
 
 ---
 

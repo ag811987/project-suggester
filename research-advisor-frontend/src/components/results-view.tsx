@@ -202,7 +202,34 @@ function ExpectedImpactSection({
   )
 }
 
-/* Section 3: Pivot Suggestions (only when PIVOT) */
+/* Section 3: Real-World Impact */
+function RealWorldImpactSection({
+  sections,
+}: {
+  sections: ReportSections | null
+}) {
+  const content = sections?.real_world_impact_section
+  if (!content) return null
+
+  return (
+    <div
+      className="rounded-lg border bg-white p-6"
+      data-testid="real-world-impact-section"
+    >
+      <h3 className="mb-4 text-lg font-semibold">
+        Real-World Impact
+      </h3>
+      <div
+        className="prose prose-sm max-w-none text-gray-700"
+        dangerouslySetInnerHTML={{
+          __html: renderMarkdown(content),
+        }}
+      />
+    </div>
+  )
+}
+
+/* Section 4: Pivot Suggestions (only when PIVOT) */
 function PivotSection({
   suggestions,
   sections,
@@ -335,7 +362,10 @@ export function ResultsView({ data }: ResultsViewProps) {
         sections={sections}
       />
 
-      {/* Section 3: Pivot Suggestions (only when PIVOT) */}
+      {/* Section 3: Real-World Impact */}
+      <RealWorldImpactSection sections={sections} />
+
+      {/* Section 4: Pivot Suggestions (only when PIVOT) */}
       {showPivot && (
         <PivotSection suggestions={data.pivot_suggestions} sections={sections} />
       )}

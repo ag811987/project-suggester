@@ -3,16 +3,27 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from app.services.novelty_analyzer import NoveltyAnalyzer
+from app.services.novelty_analyzer import (
+    NoveltyAnalyzer,
+    _merge_papers,
+    _merge_multiquery_results,
+)
 from app.models.schemas import NoveltyAssessment, ResearchDecomposition
 
 
 @pytest.fixture
 def analyzer():
-    """Create a NoveltyAnalyzer instance for testing."""
+    """Create a NoveltyAnalyzer instance for testing.
+
+    Uses legacy FWCI thresholds (1.5, 0.8) to match test expectations.
+    Production defaults are stricter (2.2, 1.2); see docs/FWCI_CALIBRATION.md.
+    """
     return NoveltyAnalyzer(
         openalex_email="test@example.com",
         openai_api_key="test-key",
+        fwci_high_threshold=1.5,
+        fwci_low_threshold=0.8,
+        search_limit=25,  # tests expect 25 papers from mock
     )
 
 
@@ -576,3 +587,223 @@ class TestExpectedImpact:
 
         assert result.expected_impact_assessment == "HIGH"
         assert result.expected_impact_reasoning == "Strong expected impact due to novel approach."
+
+
+class TestMergeMultiqueryResults:
+    """Tests for _merge_multiquery_results helper."""
+
+    def test_merges_and_ranks_by_query_count(self):
+        r1 = [{"id": "W1", "title": "A", "relevance_score": 0.5}]
+        r2 = [{"id": "W1", "title": "A", "relevance_score": 0.6}, {"id": "W2", "title": "B"}]
+        result = _merge_multiquery_results([r1, r2], limit=5)
+        assert len(result) == 2
+        assert result[0]["id"] == "W1"
+        assert result[1]["id"] == "W2"
+
+    def test_dedupes_by_id(self):
+        r1 = [{"id": "W1", "title": "A"}]
+        r2 = [{"id": "W1", "title": "A again"}]
+        result = _merge_multiquery_results([r1, r2], limit=5)
+        assert len(result) == 1
+        assert result[0]["id"] == "W1"
+
+    def test_caps_at_limit(self):
+        r1 = [{"id": f"W{i}", "title": str(i)} for i in range(5)]
+        r2 = [{"id": f"K{i}", "title": str(i)} for i in range(5)]
+        result = _merge_multiquery_results([r1, r2], limit=4)
+        assert len(result) == 4
+
+
+class TestBuildSearchQueries:
+    """Tests for _build_search_queries."""
+
+    def test_returns_key_concepts_or_when_two_plus(self):
+        analyzer = NoveltyAnalyzer(
+            openalex_email="t@t.com",
+            openai_api_key="k",
+            multi_query=True,
+        )
+        d = ResearchDecomposition(
+            core_questions=[],
+            core_motivations=[],
+            potential_impact_domains=[],
+            key_concepts=["Psittacula", "parakeet", "speciation"],
+        )
+        qs = analyzer._build_search_queries("What drives parakeet speciation?", d)
+        assert " OR " in qs[0]
+        assert "Psittacula" in qs[0] and "parakeet" in qs[0]
+
+    def test_includes_core_question_and_shortened(self):
+        analyzer = NoveltyAnalyzer(
+            openalex_email="t@t.com",
+            openai_api_key="k",
+            multi_query=True,
+        )
+        d = ResearchDecomposition(
+            core_questions=["What drives morphological change in parakeet speciation?"],
+            core_motivations=[],
+            potential_impact_domains=[],
+            key_concepts=["parakeet", "speciation"],
+        )
+        qs = analyzer._build_search_queries("What drives parakeet speciation?", d)
+        assert len(qs) >= 2
+        assert any("morphological" in q for q in qs)
+        assert any("parakeet" in q for q in qs)
+
+    def test_phrase_query_when_2_to_3_concepts(self):
+        analyzer = NoveltyAnalyzer(
+            openalex_email="t@t.com",
+            openai_api_key="k",
+            multi_query=True,
+        )
+        d = ResearchDecomposition(
+            core_questions=[],
+            core_motivations=[],
+            potential_impact_domains=[],
+            key_concepts=["parakeet", "speciation"],
+        )
+        qs = analyzer._build_search_queries("question", d)
+        assert any(q.startswith('"') and q.endswith('"') for q in qs)
+
+
+class TestMergePapers:
+    """Tests for _merge_papers helper."""
+
+    def test_merges_semantic_first_then_keyword(self):
+        semantic = [{"id": "W1", "title": "A"}, {"id": "W2", "title": "B"}]
+        keyword = [{"id": "W3", "title": "C"}, {"id": "W1", "title": "A dup"}]
+        result = _merge_papers(semantic, keyword, limit=5)
+        assert len(result) == 3
+        assert [p["id"] for p in result] == ["W1", "W2", "W3"]
+        assert result[0]["title"] == "A"
+
+    def test_dedupes_by_id(self):
+        semantic = [{"id": "W1", "title": "A"}]
+        keyword = [{"id": "W1", "title": "A again"}]
+        result = _merge_papers(semantic, keyword, limit=5)
+        assert len(result) == 1
+        assert result[0]["id"] == "W1"
+
+    def test_caps_at_limit(self):
+        semantic = [{"id": f"W{i}", "title": str(i)} for i in range(5)]
+        keyword = [{"id": f"K{i}", "title": str(i)} for i in range(5)]
+        result = _merge_papers(semantic, keyword, limit=4)
+        assert len(result) == 4
+
+
+class TestSearchPapersHybrid:
+    """Tests for hybrid semantic + keyword search with budget fallback."""
+
+    @pytest.fixture
+    def hybrid_analyzer(self):
+        """Analyzer with semantic search enabled and API key."""
+        return NoveltyAnalyzer(
+            openalex_email="test@example.com",
+            openai_api_key="test-key",
+            openalex_api_key="test-openalex-key",
+            use_semantic_search=True,
+            semantic_budget_threshold=0.05,
+            fwci_high_threshold=1.5,
+            fwci_low_threshold=0.8,
+            search_limit=8,
+        )
+
+    @pytest.fixture
+    def mock_decomposition(self):
+        return ResearchDecomposition(
+            core_questions=["What is X?"],
+            core_motivations=[],
+            potential_impact_domains=[],
+            key_concepts=["specific_term", "another_concept"],
+        )
+
+    @pytest.mark.asyncio
+    async def test_hybrid_path_when_budget_high(self, hybrid_analyzer, mock_decomposition):
+        """When budget >= threshold, runs semantic + multi-query keyword in parallel."""
+        semantic_papers = [{"id": "W1", "title": "Semantic Paper"}]
+        keyword_papers = [{"id": "W2", "title": "Keyword Paper"}]
+
+        with patch.object(
+            hybrid_analyzer._openalex_client,
+            "get_remaining_budget_usd",
+            new_callable=AsyncMock,
+            return_value=0.10,
+        ), patch.object(
+            hybrid_analyzer._openalex_client,
+            "search_papers_semantic",
+            new_callable=AsyncMock,
+            return_value=semantic_papers,
+        ) as mock_semantic, patch.object(
+            hybrid_analyzer._openalex_client,
+            "search_papers",
+            new_callable=AsyncMock,
+            return_value=keyword_papers,
+        ) as mock_keyword:
+            papers = await hybrid_analyzer._search_papers("question", mock_decomposition)
+
+        mock_semantic.assert_called_once()
+        mock_keyword.assert_called()
+        assert len(papers) == 2
+        ids = [p["id"] for p in papers]
+        assert "W1" in ids and "W2" in ids
+
+    @pytest.mark.asyncio
+    async def test_keyword_only_when_budget_low(self, hybrid_analyzer, mock_decomposition):
+        """When budget < threshold, uses keyword-only multi-query flow."""
+        keyword_papers = [
+            {"id": "W1", "title": "Keyword 1"},
+            {"id": "W2", "title": "Keyword 2"},
+            {"id": "W3", "title": "Keyword 3"},
+        ]
+
+        with patch.object(
+            hybrid_analyzer._openalex_client,
+            "get_remaining_budget_usd",
+            new_callable=AsyncMock,
+            return_value=0.02,
+        ), patch.object(
+            hybrid_analyzer._openalex_client,
+            "search_papers_semantic",
+            new_callable=AsyncMock,
+        ) as mock_semantic, patch.object(
+            hybrid_analyzer._openalex_client,
+            "search_papers",
+            new_callable=AsyncMock,
+            return_value=keyword_papers,
+        ) as mock_keyword:
+            papers = await hybrid_analyzer._search_papers("question", mock_decomposition)
+
+        mock_semantic.assert_not_called()
+        mock_keyword.assert_called()
+        assert len(papers) == 3
+        assert [p["id"] for p in papers] == ["W1", "W2", "W3"]
+
+    @pytest.mark.asyncio
+    async def test_keyword_only_when_budget_none(self, hybrid_analyzer, mock_decomposition):
+        """When get_remaining_budget_usd returns None, uses keyword-only multi-query."""
+        keyword_papers = [
+            {"id": "W1", "title": "K1"},
+            {"id": "W2", "title": "K2"},
+            {"id": "W3", "title": "K3"},
+        ]
+
+        with patch.object(
+            hybrid_analyzer._openalex_client,
+            "get_remaining_budget_usd",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch.object(
+            hybrid_analyzer._openalex_client,
+            "search_papers_semantic",
+            new_callable=AsyncMock,
+        ) as mock_semantic, patch.object(
+            hybrid_analyzer._openalex_client,
+            "search_papers",
+            new_callable=AsyncMock,
+            return_value=keyword_papers,
+        ) as mock_keyword:
+            papers = await hybrid_analyzer._search_papers("question", mock_decomposition)
+
+        mock_semantic.assert_not_called()
+        mock_keyword.assert_called()
+        assert len(papers) == 3

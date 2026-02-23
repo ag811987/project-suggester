@@ -106,4 +106,18 @@ describe('ChatInterface', () => {
     render(<ChatInterface {...defaultProps} placeholder="Custom placeholder..." />)
     expect(screen.getByPlaceholderText('Custom placeholder...')).toBeInTheDocument()
   })
+
+  it('shows intro when showIntro is true', () => {
+    render(<ChatInterface {...defaultProps} showIntro={true} />)
+    expect(
+      screen.getByText(/we'll ask 3 quick questions to understand your research/i),
+    ).toBeInTheDocument()
+  })
+
+  it('does not show intro when showIntro is false', () => {
+    render(<ChatInterface {...defaultProps} showIntro={false} />)
+    expect(
+      screen.queryByText(/we'll ask 3 quick questions to understand your research/i),
+    ).not.toBeInTheDocument()
+  })
 })

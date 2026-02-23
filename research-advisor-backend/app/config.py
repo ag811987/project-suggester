@@ -99,11 +99,16 @@ class Settings(BaseSettings):
     )
     openalex_api_key: str | None = Field(
         default=None,
-        description="OpenAlex API key for semantic search (optional, costs 1000 credits/query)"
+        description="OpenAlex API key for semantic search (optional, costs $0.01/query)"
     )
     openalex_use_semantic_search: bool = Field(
         default=False,
         description="Use semantic search instead of keyword search (requires API key)"
+    )
+    openalex_semantic_budget_threshold: float = Field(
+        default=0.05,
+        ge=0.0,
+        description="Skip semantic search when remaining daily budget (USD) is below this"
     )
     openalex_per_page: int = Field(
         default=20,
@@ -124,6 +129,41 @@ class Settings(BaseSettings):
     scraping_use_oxylabs: bool = Field(
         default=False,
         description="Whether to use Oxylabs for scraping (false = direct HTTP)"
+    )
+
+    # FWCI Calibration (OpenAlex FWCI tends to inflate vs SciVal; research suggests ~1.5x)
+    # Stricter thresholds reduce false HIGH scores. See docs/FWCI_CALIBRATION.md
+    fwci_high_threshold: float = Field(
+        default=2.2,
+        ge=0.5,
+        le=5.0,
+        description="FWCI above this = HIGH impact (default 2.2, stricter than OpenAlex raw 1.5)"
+    )
+    fwci_low_threshold: float = Field(
+        default=1.2,
+        ge=0.0,
+        le=3.0,
+        description="FWCI below this = LOW impact (default 1.2). Between low and high = MEDIUM"
+    )
+    openalex_search_limit: int = Field(
+        default=8,
+        ge=3,
+        le=15,
+        description="Number of papers to fetch for novelty analysis (3-10 recommended for tight, closely related results)"
+    )
+    openalex_multi_query: bool = Field(
+        default=True,
+        description="Use multi-query strategy for better keyword coverage"
+    )
+    openalex_queries_per_variant: int = Field(
+        default=5,
+        ge=2,
+        le=10,
+        description="Papers to fetch per query variant in multi-query mode"
+    )
+    openalex_use_embedding_rerank: bool = Field(
+        default=False,
+        description="Rerank merged papers by embedding similarity to research question"
     )
 
     # Gap Map Retrieval (Vector Search)

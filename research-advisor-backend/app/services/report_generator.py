@@ -7,9 +7,11 @@ expected impact, then generates a structured report using LLM.
 
 import json
 import logging
+import os
 
 from openai import AsyncOpenAI
 
+from app.debug_log import debug_log
 from app.models.schemas import (
     Citation,
     NoveltyAssessment,
@@ -32,6 +34,13 @@ class ReportGenerator:
     async def _call_llm(self, prompt: str) -> str:
         """Call the LLM with a prompt and return the response content."""
         if self._client is None:
+            debug_log(
+                location="app/services/report_generator.py:ReportGenerator:_call_llm:init_client",
+                message="Initializing OpenAI client for report generator",
+                data={"has_openai_api_key_env": bool(os.getenv("OPENAI_API_KEY"))},
+                run_id="pre-fix",
+                hypothesis_id="H2_OPENAI_KEY_NOT_WIRED",
+            )
             self._client = AsyncOpenAI()
 
         response = await self._client.chat.completions.create(
@@ -77,6 +86,13 @@ class ReportGenerator:
             report_sections = self._parse_sections(raw)
             narrative = self._sections_to_narrative(report_sections, recommendation)
         except Exception:
+            debug_log(
+                location="app/services/report_generator.py:ReportGenerator:generate_report:exception",
+                message="Report generator failed (exception only)",
+                data={"has_openai_api_key_env": bool(os.getenv("OPENAI_API_KEY"))},
+                run_id="pre-fix",
+                hypothesis_id="H2_OPENAI_KEY_NOT_WIRED",
+            )
             logger.exception("Error generating structured report via LLM")
             narrative = self._build_fallback_narrative(
                 profile, novelty, pivot_suggestions, recommendation
@@ -175,20 +191,28 @@ class ReportGenerator:
         pivot_instruction = ""
         if include_pivot:
             if pivot_suggestions:
-                pivot_instruction = f"""
-3. "pivot_section": Markdown text for pivot suggestions. For EACH pivot:
+                pivot_instruction = f"""4. "pivot_section": Markdown text for pivot suggestions. For EACH pivot:
    (a) What to pivot to
    (b) How to leverage skills: {', '.join(profile.skills) if profile.skills else 'their expertise'}
    (c) Next steps or links
    If recommendation is not PIVOT, set this to empty string ""."""
             else:
                 pivot_instruction = """
-3. "pivot_section": Since no specific pivots are available, suggest general directions to explore and repositories to check (Convergent Research, Homeworld Bio, 3ie Gap Maps)."""
+4. "pivot_section": Since no specific pivots are available, suggest general directions to explore and repositories to check (Convergent Research, Homeworld Bio, 3ie Gap Maps)."""
         else:
             pivot_instruction = """
-3. "pivot_section": Set to empty string "" since recommendation is not PIVOT."""
+4. "pivot_section": Set to empty string "" since recommendation is not PIVOT."""
 
-        return f"""Generate a structured research advisory report as JSON with three sections. Write as a research strategist—consider both scholarly and practical impact, not just publication metrics.
+        gap_map_context = ""
+        if pivot_suggestions:
+            gap_map_context = "\n\nHIGH-IMPACT GAP MAP PROBLEMS (for comparison—these are curated, high-impact research gaps):\n" + "\n".join(
+                f"  - {p.gap_entry.title}: {p.gap_entry.description[:150]}..."
+                if len(p.gap_entry.description or "") > 150
+                else f"  - {p.gap_entry.title}: {p.gap_entry.description or 'N/A'}"
+                for p in pivot_suggestions[:5]
+            )
+
+        return f"""Generate a structured research advisory report as JSON with four sections. Write as a research strategist—consider both scholarly and practical impact, not just publication metrics. Be appropriately critical: method-to-new-population research is usually incremental (MARGINAL), not novel. Avoid over-scoring niche problems; ask whether the research justifies the researcher's skills and who actually benefits.
 
 RESEARCHER:
 - Research Question: {profile.research_question}
@@ -213,11 +237,12 @@ RECOMMENDATION: {recommendation}
 
 PIVOT SUGGESTIONS:
 {pivots_text or 'None available.'}
+{gap_map_context}
 
 KEY CITATIONS:
 {citations_text or 'No specific citations available.'}
 
-Respond with ONLY valid JSON (no markdown code fences) containing these three keys:
+Respond with ONLY valid JSON (no markdown code fences) containing these four keys:
 
 1. "novelty_section": Markdown text analyzing whether the question is novel, marginal, or solved.
    - Include the verdict and score
@@ -228,6 +253,13 @@ Respond with ONLY valid JSON (no markdown code fences) containing these three ke
    - This is NOT the literature impact — it is the predicted impact of the researcher's own work
    - Include the expected impact level ({novelty.expected_impact_assessment}) and reasoning
    - Reference the researcher's skills and how they contribute to potential impact
+
+3. "real_world_impact_section": Markdown text assessing REAL-WORLD IMPACT. This is critical.
+   - How does the world change if they answer this question? What are the downstream consequences?
+   - Future knowledge production: what becomes possible? Problem solving: who can act on this?
+   - Is this research justified vis-a-vis the gap map problems above? Our gap maps are curated HIGH-IMPACT problems. If the researcher's question has lower real-world impact than typical gap map entries, say so clearly. Would their skills be better used on a gap map problem?
+   - Be specific: who benefits, how, and to what degree? Avoid generic praise.
+
 {pivot_instruction}
 
 Use markdown formatting within each section. Be specific and actionable.
@@ -247,6 +279,7 @@ Each section should be self-contained and readable on its own."""
         return ReportSections(
             novelty_section=data.get("novelty_section", ""),
             impact_section=data.get("impact_section", ""),
+            real_world_impact_section=data.get("real_world_impact_section", ""),
             pivot_section=data.get("pivot_section", ""),
         )
 
@@ -258,6 +291,8 @@ Each section should be self-contained and readable on its own."""
             f"## Novelty Analysis\n\n{sections.novelty_section}",
             f"## Expected Impact\n\n{sections.impact_section}",
         ]
+        if sections.real_world_impact_section:
+            parts.append(f"## Real-World Impact\n\n{sections.real_world_impact_section}")
         if sections.pivot_section:
             parts.append(f"## Pivot Suggestions\n\n{sections.pivot_section}")
         return "\n\n---\n\n".join(parts)
@@ -289,6 +324,12 @@ Each section should be self-contained and readable on its own."""
 
 {novelty.expected_impact_reasoning}"""
 
+        real_world_impact_section = (
+            "Real-world impact assessment requires LLM analysis. "
+            "Consider: How does the world change if this question is answered? "
+            "Is this justified vs. high-impact gap map problems?"
+        )
+
         pivot_section = ""
         if recommendation == "PIVOT":
             if pivot_suggestions:
@@ -309,6 +350,7 @@ Each section should be self-contained and readable on its own."""
         return ReportSections(
             novelty_section=novelty_section,
             impact_section=impact_section,
+            real_world_impact_section=real_world_impact_section,
             pivot_section=pivot_section,
         )
 

@@ -75,6 +75,7 @@ export interface PivotSuggestion {
 export interface ReportSections {
   novelty_section: string
   impact_section: string
+  real_world_impact_section?: string
   pivot_section: string
 }
 
