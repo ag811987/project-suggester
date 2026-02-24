@@ -3,7 +3,7 @@ import { ChatInterface } from './components/chat-interface'
 import type { ChatMessage } from './components/chat-interface'
 import { LandingHero } from './components/landing-hero'
 import { ResultsView } from './components/results-view'
-import { useAnalyzeResearch, useGetAnalysis } from './hooks/useAnalysis'
+import { useAnalyzeResearch, useGetAnalysis, STAGE_LABELS } from './hooks/useAnalysis'
 
 type View = 'landing' | 'chat' | 'results'
 
@@ -29,6 +29,32 @@ const STEP_PLACEHOLDERS: Record<number, string> = {
   2: 'e.g. Python, statistical analysis, clinical trial design...',
 }
 
+function AnalysisProgress({ stage }: { stage: string | null }) {
+  const label = stage ? (STAGE_LABELS[stage] ?? stage) : 'Starting analysis...'
+  const stages = [
+    'extracting_profile',
+    'analyzing_novelty',
+    'web_search',
+    'retrieving_gaps',
+    'matching_pivots',
+    'generating_report',
+  ]
+  const currentIdx = stage ? stages.indexOf(stage) : 0
+  const pct = stage === 'completed' ? 100 : Math.max(5, ((currentIdx + 1) / stages.length) * 90)
+
+  return (
+    <div className="mx-auto mt-4 w-full max-w-md px-4">
+      <div className="overflow-hidden rounded-full bg-gray-200 h-2">
+        <div
+          className="h-full rounded-full bg-blue-500 transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="mt-2 text-center text-sm text-gray-500">{label}</p>
+    </div>
+  )
+}
+
 function App() {
   const [view, setView] = useState<View>('landing')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -37,17 +63,40 @@ function App() {
   const [step, setStep] = useState<Step>(0)
 
   const analyzeMutation = useAnalyzeResearch()
-  const { data: recommendation, error: analysisError } = useGetAnalysis(
-    sessionId,
-  )
+  const { data: analysisData, error: analysisError } = useGetAnalysis(sessionId)
 
-  // When analysis completes, move to results view
+  // On mount: check for ?session= param to restore a shared/bookmarked result
   useEffect(() => {
-    if (recommendation && step === 3) {
+    const params = new URLSearchParams(window.location.search)
+    const sid = params.get('session')
+    if (sid) {
+      setSessionId(sid)
       setStep(4)
       setView('results')
     }
-  }, [recommendation, step])
+  }, [])
+
+  // When results are showing, keep URL in sync with session ID
+  useEffect(() => {
+    if (sessionId && view === 'results') {
+      const url = new URL(window.location.href)
+      url.searchParams.set('session', sessionId)
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [sessionId, view])
+
+  // When analysis completes or errors, transition view
+  useEffect(() => {
+    if (!analysisData || step !== 3) return
+
+    if (analysisData.status === 'completed' && analysisData.result) {
+      setStep(4)
+      setView('results')
+    }
+    if (analysisData.status === 'error') {
+      setStep(4)
+    }
+  }, [analysisData, step])
 
   const handleSendMessage = useCallback(
     (content: string, files?: File[]) => {
@@ -128,6 +177,7 @@ function App() {
   }
 
   const handleNewAnalysis = () => {
+    window.history.replaceState({}, '', window.location.pathname)
     setView('landing')
     setSessionId(null)
     setMessages([])
@@ -137,13 +187,14 @@ function App() {
 
   const isLoading = analyzeMutation.isPending || step === 3
   const mutationError = analyzeMutation.error
+  const backendError = analysisData?.status === 'error' ? analysisData.error_message : null
 
   // Landing view
   if (view === 'landing') {
     return (
-      <div className="flex min-h-screen flex-col bg-gradient-to-b from-slate-50 via-white to-blue-50/20">
-        <header className="flex items-center justify-between border-b border-gray-200/50 bg-white/80 px-6 py-3 backdrop-blur-sm">
-          <h1 className="text-lg font-semibold text-gray-900">
+      <div className="flex min-h-[100dvh] flex-col bg-gradient-to-b from-slate-50 via-white to-blue-50/20">
+        <header className="flex items-center justify-between border-b border-gray-200/50 bg-white/80 px-4 py-3 pt-safe backdrop-blur-sm sm:px-6">
+          <h1 className="text-base font-semibold text-gray-900 sm:text-lg">
             Research Pivot Advisor
           </h1>
         </header>
@@ -153,24 +204,24 @@ function App() {
   }
 
   // Results view
-  if (view === 'results' && recommendation) {
+  if (view === 'results' && analysisData?.result) {
     return (
-      <div className="flex h-screen flex-col bg-gray-50">
-        <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
-          <h1 className="text-lg font-semibold text-gray-900">
+      <div className="flex h-[100dvh] flex-col bg-gray-50">
+        <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 pt-safe sm:px-6">
+          <h1 className="text-base font-semibold text-gray-900 sm:text-lg">
             Research Pivot Advisor
           </h1>
           <button
             onClick={handleNewAnalysis}
-            className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+            className="touch-target flex items-center justify-center rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 active:bg-gray-300 sm:px-4"
           >
             New Analysis
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="flex-1 overflow-y-auto px-3 py-4 pb-safe sm:px-4 sm:py-6">
           <div className="mx-auto max-w-3xl">
-            <ResultsView data={recommendation} />
+            <ResultsView data={analysisData.result} sessionId={sessionId!} />
           </div>
         </div>
       </div>
@@ -179,9 +230,9 @@ function App() {
 
   // Chat view
   return (
-    <div className="relative flex h-screen flex-col bg-gray-50">
-      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
-        <h1 className="text-lg font-semibold text-gray-900">
+    <div className="relative flex h-[100dvh] flex-col bg-gray-50">
+      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 pt-safe sm:px-6">
+        <h1 className="text-base font-semibold text-gray-900 sm:text-lg">
           Research Pivot Advisor
         </h1>
         {step > 0 && step < 3 && (
@@ -191,16 +242,22 @@ function App() {
         )}
       </header>
 
-      {(mutationError || analysisError) && (
-        <div className="mx-auto mt-3 w-full max-w-3xl px-4">
+      {(mutationError || analysisError || backendError) && (
+        <div className="mx-auto mt-3 w-full max-w-3xl px-3 sm:px-4">
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {mutationError instanceof Error
-              ? mutationError.message
-              : analysisError instanceof Error
-                ? analysisError.message
-                : 'An error occurred during analysis.'}
+            {backendError
+              ? backendError
+              : mutationError instanceof Error
+                ? mutationError.message
+                : analysisError instanceof Error
+                  ? analysisError.message
+                  : 'An error occurred during analysis.'}
           </div>
         </div>
+      )}
+
+      {step === 3 && analysisData?.status === 'processing' && (
+        <AnalysisProgress stage={analysisData.stage ?? null} />
       )}
 
       <div className="flex-1 overflow-hidden">

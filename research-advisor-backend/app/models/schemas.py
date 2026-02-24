@@ -210,6 +210,16 @@ class NoveltyAssessment(BaseModel):
         description="Explanation of why we expect this impact for the researcher's work"
     )
 
+    # Real-world impact (separate from field/literature impact)
+    real_world_impact_assessment: ImpactLevel = Field(
+        default="UNCERTAIN",
+        description="Real-world impact: does this affect humanity, create new tools, or change practice?"
+    )
+    real_world_impact_reasoning: str = Field(
+        default="",
+        description="Explanation of real-world impact assessment"
+    )
+
     # Optional: research decomposition for traceability
     research_decomposition: ResearchDecomposition | None = Field(
         default=None,
@@ -302,7 +312,11 @@ class ReportSections(BaseModel):
     )
     pivot_section: str = Field(
         default="",
-        description="Markdown section with pivot suggestions (empty when not PIVOT)"
+        description="Markdown section with pivot suggestions (always populated; framed as 'Alternative Direction' when CONTINUE)"
+    )
+    verdict_section: str = Field(
+        default="",
+        description="Top-of-report final verdict synthesizing all assessments into a clear stay-or-pivot recommendation"
     )
 
 
@@ -355,6 +369,18 @@ class AnalyzeRequest(BaseModel):
     # Note: files are handled separately via multipart/form-data
 
 
+AnalysisStage = Literal[
+    "extracting_profile",
+    "analyzing_novelty",
+    "web_search",
+    "retrieving_gaps",
+    "matching_pivots",
+    "generating_report",
+    "completed",
+    "error",
+]
+
+
 class AnalyzeResponse(BaseModel):
     """Response from the /analyze endpoint."""
     session_id: str = Field(..., description="Unique session identifier for tracking")
@@ -370,6 +396,10 @@ class SessionStatusResponse(BaseModel):
     status: Literal["processing", "completed", "error"] = Field(
         ...,
         description="Current status of the analysis"
+    )
+    stage: AnalysisStage | None = Field(
+        default=None,
+        description="Current pipeline stage (for progress display)"
     )
     result: ResearchRecommendation | None = Field(
         default=None,

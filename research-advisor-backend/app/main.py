@@ -58,6 +58,21 @@ async def lifespan(app: FastAPI):
         settings.redis_url, decode_responses=True
     )
 
+    # Startup health checks — fail fast with clear logs
+    try:
+        await app.state.redis.ping()
+        logger.info("Redis health check passed")
+    except Exception as e:
+        logger.error("Redis health check FAILED (is Redis running at %s?): %s", settings.redis_url, e)
+
+    try:
+        async with app.state.db_session_factory() as session:
+            await session.execute(text("SELECT 1"))
+        logger.info("PostgreSQL health check passed")
+    except Exception as e:
+        logger.error("PostgreSQL health check FAILED (is DB running at %s?): %s",
+                     settings.database_url.split("@")[-1] if "@" in settings.database_url else "configured URL", e)
+
     # Seed gap map database if empty (ensures pivot suggestions are available)
     try:
         async with app.state.db_session_factory() as session:

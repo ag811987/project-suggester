@@ -131,9 +131,8 @@ class OpenAlexClient:
             "per_page": per_page,
             "mailto": self.email,
         }
-        # Note: /works does not require an API key; sending api_key can route requests
-        # through key-specific quotas. We only send api_key to endpoints that require it
-        # (e.g., /find/works and /rate-limit).
+        # Note: /works keyword search does not require an API key; api_key is only
+        # sent for search.semantic and /rate-limit calls.
 
         try:
             t0 = time.perf_counter()
@@ -479,43 +478,44 @@ class OpenAlexClient:
     async def search_papers_semantic(
         self, query: str, limit: int | None = None
     ) -> list[dict]:
-        """Search OpenAlex using semantic (embedding) search.
+        """Search OpenAlex using semantic (embedding) search via search.semantic.
 
-        Requires API key. Costs $0.01 per query.
-        Returns papers ranked by semantic similarity.
+        Uses the documented /works?search.semantic=... endpoint (GTE-Large embeddings,
+        ~217M works with abstracts). Requires API key. Costs $0.001 per query.
+        Returns papers ranked by semantic similarity to the query text.
         """
         if not self.api_key:
             logger.warning("Semantic search requires OpenAlex API key, falling back to keyword")
             return await self.search_papers(query, limit=limit or self.per_page)
 
-        count = min(limit or self.per_page, 100)
+        per_page = min(limit or self.per_page, 200)
 
         try:
             t0 = time.perf_counter()
             response = await self._http_client.get(
-                f"{self.BASE_URL}/find/works",
+                f"{self.BASE_URL}/works",
                 params={
-                    "query": query[:10000],
-                    "count": count,
+                    "search.semantic": query[:2000],
+                    "per_page": per_page,
+                    "mailto": self.email,
                     "api_key": self.api_key,
                 },
             )
             response.raise_for_status()
             data = response.json()
-            results = data.get("results", [])
-            papers = []
-            for r in results:
-                work = r.get("work") if isinstance(r, dict) else None
-                if work:
-                    papers.append(self._normalize_paper(work))
+            results = data.get("results", []) or []
+            papers = [self._normalize_paper(r) for r in results]
+            for p in papers:
+                p["_retrieval_source"] = "semantic"
             _debug_log(
                 location="app/services/openalex_client.py:search_papers_semantic",
-                message="OpenAlex /find/works semantic completed",
+                message="OpenAlex /works search.semantic completed",
                 data={
-                    "endpoint": "/find/works",
-                    "mode": "semantic",
-                    "count": count,
+                    "endpoint": "/works",
+                    "mode": "search.semantic",
+                    "per_page": per_page,
                     "api_key_present": True,
+                    "mailto_present": bool(self.email),
                     "results_count": len(papers),
                     "elapsed_ms": int((time.perf_counter() - t0) * 1000),
                     **_q_fingerprint(query),
@@ -527,11 +527,11 @@ class OpenAlexClient:
         except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as e:
             _debug_log(
                 location="app/services/openalex_client.py:search_papers_semantic",
-                message="OpenAlex /find/works semantic failed",
+                message="OpenAlex /works search.semantic failed",
                 data={
-                    "endpoint": "/find/works",
-                    "mode": "semantic",
-                    "count": count,
+                    "endpoint": "/works",
+                    "mode": "search.semantic",
+                    "per_page": per_page,
                     "api_key_present": True,
                     **_safe_httpx_err(e),
                     **_q_fingerprint(query),
@@ -544,11 +544,11 @@ class OpenAlexClient:
         except Exception as e:
             _debug_log(
                 location="app/services/openalex_client.py:search_papers_semantic",
-                message="OpenAlex /find/works semantic unexpected failure",
+                message="OpenAlex /works search.semantic unexpected failure",
                 data={
-                    "endpoint": "/find/works",
-                    "mode": "semantic",
-                    "count": count,
+                    "endpoint": "/works",
+                    "mode": "search.semantic",
+                    "per_page": per_page,
                     "api_key_present": True,
                     "error_type": type(e).__name__,
                     **_q_fingerprint(query),

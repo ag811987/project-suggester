@@ -160,7 +160,7 @@ class InfoCollectionService:
         )
 
     async def _call_openai(self, user_prompt: str) -> str:
-        """Call OpenAI chat completion API.
+        """Call OpenAI chat completion API with structured JSON output.
 
         Args:
             user_prompt: The user message to send.
@@ -176,6 +176,8 @@ class InfoCollectionService:
             ],
             temperature=self._temperature,
             max_tokens=self._max_tokens,
+            response_format={"type": "json_object"},
+            timeout=60,
         )
         return response.choices[0].message.content
 

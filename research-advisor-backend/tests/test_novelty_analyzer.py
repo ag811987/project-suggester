@@ -218,12 +218,15 @@ class TestNoveltyVerdict:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("HIGH", "High impact field.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
+            mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
             result = await analyzer.analyze("novel quantum computing approach")
 
@@ -247,12 +250,15 @@ class TestNoveltyVerdict:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("LOW")
+            mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
             result = await analyzer.analyze("well known solved problem")
 
@@ -275,12 +281,15 @@ class TestNoveltyVerdict:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = medium_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("MEDIUM", "Medium impact.")
             mock_impact.return_value = _mock_expected_impact("LOW")
+            mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
             result = await analyzer.analyze("incremental improvement")
 
@@ -303,6 +312,7 @@ class TestNoveltyVerdict:
         assert result.verdict == "UNCERTAIN"
         assert result.impact_assessment == "UNCERTAIN"
         assert result.expected_impact_assessment == "UNCERTAIN"
+        assert result.real_world_impact_assessment == "UNCERTAIN"
 
 
 class TestFWCIIntegration:
@@ -322,12 +332,15 @@ class TestFWCIIntegration:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
+            mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
             result = await analyzer.analyze("quantum computing")
 
@@ -349,12 +362,15 @@ class TestFWCIIntegration:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = medium_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("MEDIUM", "Medium impact.")
             mock_impact.return_value = _mock_expected_impact("MEDIUM")
+            mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
             result = await analyzer.analyze("some topic")
 
@@ -375,12 +391,15 @@ class TestFWCIIntegration:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = low_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("LOW", "Low impact.")
             mock_impact.return_value = _mock_expected_impact("LOW")
+            mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
             result = await analyzer.analyze("obscure topic")
 
@@ -400,12 +419,15 @@ class TestFWCIIntegration:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = none_fwci_papers
             mock_llm.return_value = _mock_llm_response("UNCERTAIN", 0.5, "Insufficient data.")
             mock_impact_llm.return_value = ("UNCERTAIN", "No FWCI data.")
             mock_impact.return_value = _mock_expected_impact("UNCERTAIN", "Cannot assess.")
+            mock_rw_impact.return_value = ("UNCERTAIN", "Cannot assess real-world impact.")
 
             result = await analyzer.analyze("topic with no metrics")
 
@@ -453,12 +475,15 @@ class TestFWCIIntegration:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
+            mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
             result = await analyzer.analyze("mixed fwci topic")
 
@@ -485,12 +510,15 @@ class TestEvidenceCitations:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
+            mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
             result = await analyzer.analyze("test")
 
@@ -545,12 +573,15 @@ class TestAnalyzerErrorHandling:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.side_effect = Exception("LLM failure")
             mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("UNCERTAIN", "Cannot assess.")
+            mock_rw_impact.return_value = ("UNCERTAIN", "Cannot assess real-world impact.")
 
             result = await analyzer.analyze("test")
 
@@ -576,12 +607,15 @@ class TestExpectedImpact:
             analyzer, "_assess_impact_llm", new_callable=AsyncMock
         ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
-        ) as mock_impact:
+        ) as mock_impact, patch.object(
+            analyzer, "_assess_real_world_impact", new_callable=AsyncMock
+        ) as mock_rw_impact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
             mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = ("HIGH", "Strong expected impact due to novel approach.")
+            mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
             result = await analyzer.analyze("quantum research")
 
@@ -630,7 +664,8 @@ class TestBuildSearchQueries:
             key_concepts=["Psittacula", "parakeet", "speciation"],
         )
         qs = analyzer._build_search_queries("What drives parakeet speciation?", d)
-        assert " OR " in qs[0]
+        # First query is niche phrase (Scholar-style), not OR
+        assert qs[0]
         assert "Psittacula" in qs[0] and "parakeet" in qs[0]
 
     def test_includes_core_question_and_shortened(self):
@@ -663,7 +698,8 @@ class TestBuildSearchQueries:
             key_concepts=["parakeet", "speciation"],
         )
         qs = analyzer._build_search_queries("question", d)
-        assert any(q.startswith('"') and q.endswith('"') for q in qs)
+        # Niche or phrase-ish query: space-joined terms (no quotes)
+        assert any("parakeet" in q and "speciation" in q for q in qs)
 
 
 class TestMergePapers:
@@ -689,6 +725,20 @@ class TestMergePapers:
         keyword = [{"id": f"K{i}", "title": str(i)} for i in range(5)]
         result = _merge_papers(semantic, keyword, limit=4)
         assert len(result) == 4
+
+    def test_preserves_retrieval_source(self):
+        semantic = [{"id": "W1", "title": "A"}]
+        keyword = [{"id": "W2", "title": "B"}]
+        result = _merge_papers(semantic, keyword, limit=5)
+        assert result[0]["_retrieval_source"] == "semantic"
+        assert result[1]["_retrieval_source"] == "keyword"
+
+    def test_semantic_source_wins_on_duplicate(self):
+        semantic = [{"id": "W1", "title": "A", "_retrieval_source": "semantic"}]
+        keyword = [{"id": "W1", "title": "A again", "_retrieval_source": "keyword"}]
+        result = _merge_papers(semantic, keyword, limit=5)
+        assert len(result) == 1
+        assert result[0]["_retrieval_source"] == "semantic"
 
 
 class TestSearchPapersHybrid:
@@ -742,6 +792,9 @@ class TestSearchPapersHybrid:
             papers = await hybrid_analyzer._search_papers("question", mock_decomposition)
 
         mock_semantic.assert_called_once()
+        # Semantic query should use the full research question, not just key concepts
+        semantic_call_query = mock_semantic.call_args[0][0]
+        assert "question" in semantic_call_query
         mock_keyword.assert_called()
         assert len(papers) == 2
         ids = [p["id"] for p in papers]

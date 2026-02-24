@@ -121,10 +121,10 @@ export function ChatInterface({
       onDrop={handleDrop}
     >
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto max-w-3xl space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-4 sm:py-6">
+        <div className="mx-auto max-w-3xl space-y-4 sm:space-y-6">
           {showIntro && (
-            <p className="text-center text-sm text-slate-500">
+            <p className="text-center text-xs text-slate-500 sm:text-sm">
               We&apos;ll ask 3 quick questions to understand your research.
             </p>
           )}
@@ -138,13 +138,13 @@ export function ChatInterface({
             >
               <div
                 className={cn(
-                  'max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
+                  'max-w-[90%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed sm:max-w-[85%] sm:px-4 sm:py-3',
                   message.role === 'user'
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-900',
                 )}
               >
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                <div className="whitespace-pre-wrap break-words">{message.content}</div>
                 {message.files && message.files.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {message.files.map((f, i) => (
@@ -158,7 +158,7 @@ export function ChatInterface({
                         )}
                       >
                         <FileIcon />
-                        {f.name}
+                        <span className="max-w-[100px] truncate sm:max-w-[120px]">{f.name}</span>
                       </span>
                     ))}
                   </div>
@@ -192,22 +192,22 @@ export function ChatInterface({
         </div>
       )}
 
-      {/* Input area */}
-      <div className="border-t border-gray-200 bg-white px-4 py-3">
+      {/* Input area — safe area padding for devices with home indicators */}
+      <div className="border-t border-gray-200 bg-white px-3 py-2 pb-safe sm:px-4 sm:py-3">
         <div className="mx-auto max-w-3xl">
           {/* Attached files preview */}
           {attachedFiles.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
+            <div className="mb-2 flex flex-wrap gap-1.5 sm:gap-2">
               {attachedFiles.map((file, index) => (
                 <span
                   key={`${file.name}-${index}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
+                  className="inline-flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1 text-xs text-gray-700 sm:gap-1.5 sm:px-2.5"
                 >
                   <FileIcon />
-                  <span className="max-w-[120px] truncate">{file.name}</span>
+                  <span className="max-w-[100px] truncate sm:max-w-[120px]">{file.name}</span>
                   <button
                     onClick={() => removeFile(index)}
-                    className="ml-0.5 text-gray-400 hover:text-gray-600"
+                    className="ml-0.5 p-0.5 text-gray-400 hover:text-gray-600 active:text-gray-800"
                     aria-label="Remove file"
                   >
                     &times;
@@ -221,12 +221,12 @@ export function ChatInterface({
             <p className="mb-2 text-xs text-red-500">{fileError}</p>
           )}
 
-          <div className="flex items-end gap-2">
-            {/* Attach button */}
+          <div className="flex items-end gap-1.5 sm:gap-2">
+            {/* Attach button — touch-friendly sizing */}
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isLoading || disabled}
-              className="mb-0.5 flex-shrink-0 rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+              className="touch-target mb-0.5 flex flex-shrink-0 items-center justify-center rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 active:bg-gray-200 disabled:opacity-50"
               aria-label="Attach file"
             >
               <AttachIcon />
@@ -246,19 +246,19 @@ export function ChatInterface({
               className="hidden"
             />
 
-            {/* Text input */}
+            {/* Text input — 16px font prevents iOS zoom */}
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              className="max-h-36 min-h-[44px] flex-1 resize-none rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              className="max-h-36 min-h-[44px] flex-1 resize-none rounded-xl border border-gray-300 px-3 py-2.5 text-[16px] leading-normal focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 sm:px-4 sm:text-sm"
               rows={1}
               disabled={isLoading || disabled}
             />
 
-            {/* Send button */}
+            {/* Send button — touch-friendly sizing */}
             <button
               onClick={handleSend}
               disabled={
@@ -266,7 +266,7 @@ export function ChatInterface({
                 disabled ||
                 (!input.trim() && attachedFiles.length === 0)
               }
-              className="mb-0.5 flex-shrink-0 rounded-lg bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="touch-target mb-0.5 flex flex-shrink-0 items-center justify-center rounded-lg bg-blue-600 p-2.5 text-white hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed sm:p-2"
               aria-label="Send message"
             >
               <SendIcon />

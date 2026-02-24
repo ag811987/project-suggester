@@ -426,6 +426,70 @@ class TestPaperEnrichment:
         assert p["keywords"] == [("deep learning", 0.85), ("AI", 0.6)]
 
 
+class TestSearchPapersSemantic:
+    """Tests for search_papers_semantic using /works?search.semantic= endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_calls_works_endpoint(self, mock_openalex_papers):
+        client = OpenAlexClient(email="test@example.com", api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_openalex_papers
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(client, "_http_client") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_response)
+            papers = await client.search_papers_semantic("machine learning drug discovery")
+
+        call_args = mock_http.get.call_args
+        assert call_args[0][0].endswith("/works")
+        params = call_args[1].get("params", call_args[0][1] if len(call_args[0]) > 1 else {})
+        if isinstance(params, dict):
+            assert "search.semantic" in params
+            assert params["api_key"] == "test-key"
+            assert "mailto" in params
+
+        assert len(papers) == 3
+        assert papers[0]["title"] == "Paper One"
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_tags_retrieval_source(self, mock_openalex_papers):
+        client = OpenAlexClient(email="test@example.com", api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_openalex_papers
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(client, "_http_client") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_response)
+            papers = await client.search_papers_semantic("test query")
+
+        for p in papers:
+            assert p["_retrieval_source"] == "semantic"
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_falls_back_without_api_key(self, mock_openalex_papers):
+        client = OpenAlexClient(email="test@example.com", api_key=None)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_openalex_papers
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(client, "_http_client") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_response)
+            papers = await client.search_papers_semantic("test query")
+
+        assert len(papers) == 3
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_returns_empty_on_error(self):
+        client = OpenAlexClient(email="test@example.com", api_key="test-key")
+        with patch.object(client, "_http_client") as mock_http:
+            mock_http.get = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+            papers = await client.search_papers_semantic("test query")
+        assert papers == []
+
+
 class TestGetRemainingBudgetUsd:
     """Tests for get_remaining_budget_usd."""
 

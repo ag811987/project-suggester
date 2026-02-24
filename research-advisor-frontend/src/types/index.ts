@@ -51,6 +51,8 @@ export interface NoveltyAssessment {
   impact_reasoning: string
   expected_impact_assessment: ImpactLevel
   expected_impact_reasoning: string
+  real_world_impact_assessment?: ImpactLevel
+  real_world_impact_reasoning?: string
   research_decomposition?: ResearchDecomposition | null
 }
 
@@ -77,6 +79,7 @@ export interface ReportSections {
   impact_section: string
   real_world_impact_section?: string
   pivot_section: string
+  verdict_section?: string
 }
 
 export interface ResearchRecommendation {
@@ -99,9 +102,20 @@ export interface AnalyzeResponse {
   status: 'processing' | 'completed' | 'error'
 }
 
+export type AnalysisStage =
+  | 'extracting_profile'
+  | 'analyzing_novelty'
+  | 'web_search'
+  | 'retrieving_gaps'
+  | 'matching_pivots'
+  | 'generating_report'
+  | 'completed'
+  | 'error'
+
 export interface SessionStatusResponse {
   session_id: string
   status: 'processing' | 'completed' | 'error'
+  stage: AnalysisStage | null
   result: ResearchRecommendation | null
   error_message: string | null
 }

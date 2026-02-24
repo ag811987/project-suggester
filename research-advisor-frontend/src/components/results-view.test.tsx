@@ -79,24 +79,24 @@ const mockRecommendation: ResearchRecommendation = {
 
 describe('ResultsView', () => {
   it('renders the results view container', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     expect(screen.getByTestId('results-view')).toBeInTheDocument()
   })
 
   it('displays the recommendation badge with correct type', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     const badge = screen.getByTestId('recommendation-badge')
     expect(badge).toBeInTheDocument()
     expect(badge).toHaveTextContent('CONTINUE')
   })
 
   it('shows confidence percentage', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     expect(screen.getByText('Confidence: 85%')).toBeInTheDocument()
   })
 
   it('displays novelty assessment section', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     const section = screen.getByTestId('novelty-section')
     expect(section).toBeInTheDocument()
     expect(section).toHaveTextContent('NOVEL')
@@ -104,26 +104,26 @@ describe('ResultsView', () => {
   })
 
   it('shows FWCI metrics', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     const fwci = screen.getByTestId('fwci-metric')
     expect(fwci).toBeInTheDocument()
     expect(fwci).toHaveTextContent('1.85')
   })
 
   it('displays related papers count', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     expect(screen.getByText('42')).toBeInTheDocument()
   })
 
   it('displays expected impact section', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     const section = screen.getByTestId('expected-impact-section')
     expect(section).toBeInTheDocument()
-    expect(section).toHaveTextContent('Expected Impact')
+    expect(section).toHaveTextContent('Impact on the field')
   })
 
   it('shows field impact as secondary context', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     expect(
       screen.getByText(
         'High FWCI indicates strong impact potential in this research area.',
@@ -131,13 +131,23 @@ describe('ResultsView', () => {
     ).toBeInTheDocument()
   })
 
-  it('does not show pivot suggestions for CONTINUE recommendation', () => {
-    render(<ResultsView data={mockRecommendation} />)
+  it('shows alternative direction for CONTINUE recommendation with pivots', () => {
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
+    expect(screen.getByTestId('pivot-suggestions')).toBeInTheDocument()
+    expect(screen.getByText('Alternative Direction')).toBeInTheDocument()
+  })
+
+  it('does not show pivot section for CONTINUE recommendation without pivots', () => {
+    const noPivotData: ResearchRecommendation = {
+      ...mockRecommendation,
+      pivot_suggestions: [],
+    }
+    render(<ResultsView data={noPivotData} sessionId="test-session-123" />)
     expect(screen.queryByTestId('pivot-suggestions')).not.toBeInTheDocument()
   })
 
   it('displays evidence citations with links', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     const citations = screen.getAllByTestId('citation-item')
     expect(citations).toHaveLength(2)
 
@@ -149,13 +159,13 @@ describe('ResultsView', () => {
   })
 
   it('renders citation without link when no url/doi', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     const noLinkCitation = screen.getByText('Error Correction Survey (2023)')
     expect(noLinkCitation.tagName).toBe('SPAN')
   })
 
   it('shows FWCI on citations when available', () => {
-    render(<ResultsView data={mockRecommendation} />)
+    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
     expect(screen.getByText('FWCI: 2.50')).toBeInTheDocument()
   })
 
@@ -165,7 +175,7 @@ describe('ResultsView', () => {
         ...mockRecommendation,
         recommendation: 'PIVOT',
       }
-      render(<ResultsView data={pivotData} />)
+      render(<ResultsView data={pivotData} sessionId="test-session-123" />)
       expect(screen.getByTestId('recommendation-badge')).toHaveTextContent(
         'PIVOT',
       )
@@ -179,7 +189,7 @@ describe('ResultsView', () => {
         ...mockRecommendation,
         recommendation: 'PIVOT',
       }
-      render(<ResultsView data={pivotData} />)
+      render(<ResultsView data={pivotData} sessionId="test-session-123" />)
       expect(
         screen.getByText(
           'Research gap in topological approaches to quantum error correction.',
@@ -195,7 +205,7 @@ describe('ResultsView', () => {
         ...mockRecommendation,
         recommendation: 'PIVOT',
       }
-      render(<ResultsView data={pivotData} />)
+      render(<ResultsView data={pivotData} sessionId="test-session-123" />)
       const link = screen.getByText('View source')
       expect(link).toHaveAttribute('href', 'https://example.com/gap1')
       expect(link).toHaveAttribute('target', '_blank')
@@ -208,7 +218,7 @@ describe('ResultsView', () => {
         ...mockRecommendation,
         recommendation: 'UNCERTAIN',
       }
-      render(<ResultsView data={uncertainData} />)
+      render(<ResultsView data={uncertainData} sessionId="test-session-123" />)
       expect(screen.getByTestId('recommendation-badge')).toHaveTextContent(
         'UNCERTAIN',
       )
@@ -216,13 +226,13 @@ describe('ResultsView', () => {
   })
 
   describe('with no pivot suggestions and PIVOT', () => {
-    it('does not render pivot cards but shows pivot section', () => {
+    it('does not render pivot cards when no suggestions', () => {
       const noPivotData: ResearchRecommendation = {
         ...mockRecommendation,
         recommendation: 'PIVOT',
         pivot_suggestions: [],
       }
-      render(<ResultsView data={noPivotData} />)
+      render(<ResultsView data={noPivotData} sessionId="test-session-123" />)
       expect(screen.queryByTestId('pivot-card')).not.toBeInTheDocument()
     })
   })
@@ -233,10 +243,56 @@ describe('ResultsView', () => {
         ...mockRecommendation,
         evidence_citations: [],
       }
-      render(<ResultsView data={noCitationsData} />)
+      render(<ResultsView data={noCitationsData} sessionId="test-session-123" />)
       expect(
         screen.queryByTestId('citations-section'),
       ).not.toBeInTheDocument()
+    })
+  })
+
+  describe('with verdict section', () => {
+    it('renders verdict section when report_sections has verdict_section', () => {
+      const dataWithVerdict: ResearchRecommendation = {
+        ...mockRecommendation,
+        report_sections: {
+          novelty_section: 'Novelty text',
+          impact_section: 'Impact text',
+          real_world_impact_section: 'Real-world impact text',
+          pivot_section: '',
+          verdict_section: 'We recommend you **continue** your current research direction.',
+        },
+      }
+      render(<ResultsView data={dataWithVerdict} sessionId="test-session-123" />)
+      expect(screen.getByTestId('verdict-section')).toBeInTheDocument()
+      expect(screen.getByText('Final Verdict')).toBeInTheDocument()
+    })
+
+    it('does not render verdict section when missing', () => {
+      render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
+      expect(screen.queryByTestId('verdict-section')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('with real-world impact badge', () => {
+    it('shows real-world impact badge when assessment provided', () => {
+      const dataWithRWImpact: ResearchRecommendation = {
+        ...mockRecommendation,
+        report_sections: {
+          novelty_section: 'Novelty text',
+          impact_section: 'Impact text',
+          real_world_impact_section: 'Real-world impact text',
+          pivot_section: '',
+        },
+        novelty_assessment: {
+          ...mockRecommendation.novelty_assessment,
+          real_world_impact_assessment: 'LOW',
+          real_world_impact_reasoning: 'Niche impact only.',
+        },
+      }
+      render(<ResultsView data={dataWithRWImpact} sessionId="test-session-123" />)
+      const rwSection = screen.getByTestId('real-world-impact-section')
+      expect(rwSection).toBeInTheDocument()
+      expect(rwSection).toHaveTextContent('LOW')
     })
   })
 
@@ -252,7 +308,7 @@ describe('ResultsView', () => {
           citation_percentile_max: null,
         },
       }
-      render(<ResultsView data={noFwciData} />)
+      render(<ResultsView data={noFwciData} sessionId="test-session-123" />)
       expect(screen.queryByTestId('fwci-metric')).not.toBeInTheDocument()
     })
   })

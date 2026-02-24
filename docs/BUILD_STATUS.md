@@ -2,7 +2,45 @@
 
 ## Current Status: PHASE 5 COMPLETE ✅ — ALL PHASES DONE
 
-**Last Updated:** 2026-02-20
+**Last Updated:** 2026-02-24
+
+---
+
+## Recent Updates (Paper Relevance, Impact Clarity, Pivot Specificity)
+
+**2026-02-24: Paper Relevance, Impact Labels, Template-Driven Pivots**
+- **Part 1 — Paper retrieval:** Niche query (taxonomic + topic phrase) runs first; results prepended to merge so high-precision hits (e.g. Psittacara parakeet speciation) rank higher. Citation cap (top 10 by BM25) and stricter min_bm25_score (1.2) reduce marginal references.
+- **Part 2 — Impact labels:** Renamed to "Impact on the field" (discipline, methods, tools) and "Global impact" (society, policy, population) in prompts, narrative, and UI.
+- **Part 3 — Pivot suggestions:** When suggestions exist, pivot_section is built from template (title, link, match_reasoning, impact_rationale) — not LLM freeform. When none: short static fallback with repo links (Convergent Research, 3ie, Homeworld Bio). Removed pivot matcher fallback that returned a pivot when LLM returned [].
+
+---
+
+## Recent Updates (First-Principles Reliability + Async Pipeline)
+
+**2026-02-24: Stabilize Runtime, Async Job Pipeline, Web Search, Frontend Polling**
+- **Startup health checks:** Redis and PostgreSQL are now pinged during app startup with clear error messages (no user data logged).
+- **Structured JSON from OpenAI:** All LLM services (`InfoCollector`, `PivotMatcher`, `ReportGenerator`) now use `response_format={"type": "json_object"}` with explicit 60s timeouts.
+- **JSON retry+fallback:** `PivotMatcher` and `ReportGenerator` retry once on JSON parse failure with a strict "return JSON only" re-prompt, then return safe defaults (`[]` / `{}`) instead of crashing.
+- **OpenAI web-search tool:** New `app/services/web_search_client.py` wraps the OpenAI Responses API `web_search` tool. Triggered only when OpenAlex novelty/impact is `UNCERTAIN`. Results cached in Redis.
+- **Async job pipeline:** `POST /analyze` now returns immediately with `status: "processing"`. The pipeline runs as a background `asyncio.create_task`. Each stage writes its name to Redis so the frontend can poll.
+- **GET /analysis/{session_id}:** Now returns `SessionStatusResponse` with `stage` field for progress, `result` when completed, and `error_message` on failure.
+- **Frontend polling:** `useGetAnalysis` hook polls every 2s via `refetchInterval`. New `AnalysisProgress` bar shows current stage label and progress percentage.
+- **Schema updates:** Added `AnalysisStage` literal type and `stage` field to `SessionStatusResponse` (backend + frontend types).
+- **Cleaned up debug agent logs:** Removed diagnostic `fetch()` interceptors from `src/api/client.ts`.
+- **Tests:** 22 new tests — `test_web_search_client.py` (9 tests: serialization, cache key normalization, API calls, Redis cache hit/miss, error handling) + `test_pipeline_and_fallbacks.py` (13 tests: JSON fallback, UNCERTAIN fallback, decision engine rules, schema validation). All 63 existing+new tests pass.
+
+---
+
+## Recent Updates (OpenAlex Semantic Search Alignment + Taxonomy Gap Retrieval)
+
+**2026-02-23: OpenAlex Search + Taxonomy Integration**
+- **Semantic search aligned with docs:** Replaced undocumented `/find/works` with documented `/works?search.semantic=...` endpoint (GTE-Large embeddings, ~217M works). Cost updated from $0.01 to $0.001/query.
+- **Richer semantic query:** Semantic search now uses full research question (not shortened key concepts) for better abstract-level matching.
+- **Retrieval provenance:** Papers tagged with `_retrieval_source` (semantic vs keyword) through merge pipeline for downstream weighting.
+- **Taxonomy-aware gap retrieval:** `GapRetriever` applies taxonomy boosting — entries in researcher's subfield/field/domain ranked higher while cross-domain pivots remain available.
+- **Taxonomy supplementation:** When vector search returns few results, taxonomy-matched entries supplement the candidate set.
+- **Repository helper:** Added `GapMapRepository.get_by_taxonomy()` for OR-filtered, specificity-ordered taxonomy queries.
+- **Tests:** New `TestSearchPapersSemantic` (endpoint, provenance, fallback, error), `TestMergePapers` (provenance preservation), `TestTaxonomyBoost` (scoring), `TestGapRetrieverTaxonomyBoosting` (reorder, supplement, no-classification passthrough).
 
 ---
 

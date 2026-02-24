@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     )
     openalex_api_key: str | None = Field(
         default=None,
-        description="OpenAlex API key for semantic search (optional, costs $0.01/query)"
+        description="OpenAlex API key for semantic search (optional, costs $0.001/query)"
     )
     openalex_use_semantic_search: bool = Field(
         default=False,

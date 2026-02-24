@@ -2,9 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  /* Prevent iOS zoom on input focus (font-size >= 16px prevents zoom) */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Use safe area insets for devices with notches/home indicators */
+  html {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  /* Smooth scrolling with momentum on iOS */
+  .overflow-y-auto,
+  .overflow-y-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Prevent pull-to-refresh on mobile when inside the app */
+  body {
+    overscroll-behavior-y: contain;
+  }
+}
+
 @layer utilities {
   .animate-fade-in {
     animation: fadeIn 0.5s ease-out forwards;
+  }
+
+  /* Safe area utilities */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Minimum touch target size (44x44 per Apple HIG) */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 

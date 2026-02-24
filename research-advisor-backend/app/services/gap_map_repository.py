@@ -107,6 +107,45 @@ class GapMapRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_by_taxonomy(
+        self,
+        domain: str | None = None,
+        field: str | None = None,
+        subfield: str | None = None,
+        limit: int = 50,
+    ) -> list[GapMapEntryDB]:
+        """Return gap map entries matching any of the given taxonomy levels.
+
+        Uses OR logic: entries matching domain OR field OR subfield are included,
+        ordered by specificity (subfield > field > domain).
+        """
+        from sqlalchemy import case, or_
+
+        conditions = []
+        order_score_cases = []
+        if subfield:
+            conditions.append(GapMapEntryDB.openalex_subfield == subfield)
+            order_score_cases.append((GapMapEntryDB.openalex_subfield == subfield, 3))
+        if field:
+            conditions.append(GapMapEntryDB.openalex_field == field)
+            order_score_cases.append((GapMapEntryDB.openalex_field == field, 2))
+        if domain:
+            conditions.append(GapMapEntryDB.openalex_domain == domain)
+            order_score_cases.append((GapMapEntryDB.openalex_domain == domain, 1))
+
+        if not conditions:
+            return []
+
+        score_expr = case(*order_score_cases, else_=0)
+        stmt = (
+            select(GapMapEntryDB)
+            .where(or_(*conditions))
+            .order_by(score_expr.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_entries_without_taxonomy(self, limit: int = 500) -> list[GapMapEntryDB]:
         """Return gap map entries that have no OpenAlex taxonomy yet."""
         stmt = (

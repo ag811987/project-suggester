@@ -1,5 +1,19 @@
 # Implementation Priorities - Research Pivot Advisor System
 
+## Post-MVP: First-Principles Reliability (2026-02-24) ✅ COMPLETE
+
+- [x] Startup health checks for Redis + PostgreSQL in `main.py`
+- [x] Structured JSON output (`response_format`) + 60s timeouts on all LLM calls
+- [x] JSON retry + UNCERTAIN fallback in PivotMatcher and ReportGenerator
+- [x] OpenAI web-search tool wrapper (`web_search_client.py`) with Redis cache
+- [x] Async job pipeline: `/analyze` returns immediately, background task writes stages
+- [x] `SessionStatusResponse` with `stage` field for progress tracking
+- [x] Frontend polling (2s interval) with progress bar and stage labels
+- [x] 22 new tests (web search + pipeline fallbacks + decision engine)
+- [x] Documentation updated (BUILD_STATUS.md, IMPLEMENTATION_PRIORITIES.md)
+
+---
+
 ## Build Strategy: Parallel Execution for 1-Hour Target
 
 This document breaks down the build into phases with **explicit parallelization opportunities**. Use multiple Claude Code agents simultaneously.

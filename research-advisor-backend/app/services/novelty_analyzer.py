@@ -124,6 +124,7 @@ def _bm25_rerank(
             if ph and len(ph) >= 6 and ph in d_text:
                 score += 2.0
 
+        paper["_bm25_score"] = score
         scored.append((score, paper))
 
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -131,9 +132,17 @@ def _bm25_rerank(
 
 
 def _merge_papers(semantic: list[dict], keyword: list[dict], limit: int) -> list[dict]:
-    """Merge semantic and keyword results, dedupe by paper id, semantic first."""
+    """Merge semantic and keyword results, dedupe by paper id, semantic first.
+
+    Preserves _retrieval_source: papers from semantic list keep 'semantic',
+    papers only found via keyword keep 'keyword'.
+    """
     seen: set[str] = set()
     merged: list[dict] = []
+    for p in semantic:
+        p.setdefault("_retrieval_source", "semantic")
+    for p in keyword:
+        p.setdefault("_retrieval_source", "keyword")
     for p in semantic + keyword:
         pid = p.get("id")
         if pid and pid not in seen:
@@ -378,17 +387,24 @@ class NoveltyAnalyzer:
                 impact_level = "UNCERTAIN"
             impact_reasoning = self._build_impact_reasoning(stats, impact_level)
 
-        # Step 7: Assess expected impact of the researcher's work
-        expected_impact, expected_reasoning = await self._assess_expected_impact(
-            research_question,
-            profile,
-            verdict,
-            score,
-            papers,
-            stats,
-            decomposition,
-            researcher_classification,
-            tier_stats,
+        # Step 7: Assess expected impact and real-world impact in parallel
+        (expected_impact, expected_reasoning), (rw_impact, rw_reasoning) = (
+            await asyncio.gather(
+                self._assess_expected_impact(
+                    research_question,
+                    profile,
+                    verdict,
+                    score,
+                    papers,
+                    stats,
+                    decomposition,
+                    researcher_classification,
+                    tier_stats,
+                ),
+                self._assess_real_world_impact(
+                    research_question, profile, decomposition, verdict, papers
+                ),
+            )
         )
 
         return NoveltyAssessment(
@@ -405,6 +421,8 @@ class NoveltyAnalyzer:
             impact_reasoning=impact_reasoning,
             expected_impact_assessment=expected_impact,
             expected_impact_reasoning=expected_reasoning,
+            real_world_impact_assessment=rw_impact,
+            real_world_impact_reasoning=rw_reasoning,
             research_decomposition=decomposition,
             researcher_classification=researcher_classification,
         )
@@ -437,7 +455,7 @@ Extract structured JSON with:
 - core_questions: 1-3 fundamental questions the research aims to answer
 - core_motivations: What drives this research (e.g., fundamental understanding, practical impact, method innovation)
 - potential_impact_domains: Who/what benefits if this succeeds (e.g., clinicians, policy, basic science)
-- key_concepts: SPECIFIC search terms—include genus/species names, model names, exact techniques (e.g., Psittacula, parakeet, morphological phylogeny). Avoid broad terms alone (speciation, ecology) that match unrelated highly-cited papers. Preserve niche specificity.
+- key_concepts: SPECIFIC search terms—include genus/species names, model names, exact techniques (e.g., Psittacara, parakeet, morphological phylogeny). Include one primary topic (e.g., speciation, conservation). Avoid broad terms alone (speciation, ecology) that match unrelated highly-cited papers. Preserve niche specificity.
 
 Respond with ONLY valid JSON (no markdown, no code fences)."""
 
@@ -556,14 +574,38 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
     def _build_search_queries(
         self, research_question: str, decomposition: ResearchDecomposition
     ) -> list[str]:
-        """Build 3-5 query variants from decomposition for multi-query search."""
+        """Build 3-6 query variants from decomposition for multi-query search.
+
+        First query is a high-precision 'niche' phrase (Scholar-style) built from
+        taxonomic/specific terms + primary topic, so narrow hits rank well.
+        """
         queries: list[str] = []
         kc = [k for k in (decomposition.key_concepts or []) if k and len(k) > 2]
         cq = decomposition.core_questions or []
 
+        # Q0 (niche): high-precision phrase from specific concepts + topic (Scholar-style)
+        # e.g. "speciation Psittacara parakeets" or "Psittacara parakeet speciation"
+        specific = [k for k in kc if _looks_specific(k)]
+        if specific:
+            # Build niche phrase: 2-3 specific terms + one topic-like term
+            topic_candidates = ["speciation", "conservation", "phylogeny", "ecology", "evolution"]
+            topic = None
+            for t in topic_candidates:
+                if any(t in (k or "").lower() for k in kc):
+                    topic = t
+                    break
+            niche_parts = specific[:3]
+            if topic and topic not in " ".join(niche_parts).lower():
+                niche_parts.append(topic)
+            niche = " ".join(niche_parts[:4])
+            if niche and niche not in queries:
+                queries.append(niche)
+
         # Q1: space-joined key concepts (avoid OR, which tends to pull famous unrelated tools)
         if kc:
-            queries.append(" ".join(kc[:6]))
+            q1 = " ".join(kc[:6])
+            if q1 and q1 not in queries:
+                queries.append(q1)
 
         # Q2: first core question (10 words)
         if cq:
@@ -582,7 +624,7 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
             if phraseish and phraseish not in queries:
                 queries.append(phraseish)
 
-        return queries[:5]
+        return queries[:6]
 
     async def _rerank_papers_by_embedding(
         self, research_question: str, papers: list[dict], limit: int
@@ -628,25 +670,70 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
     async def _run_multiquery_keyword(
         self, queries: list[str], limit: int
     ) -> list[dict]:
-        """Run multiple keyword queries in parallel, merge and rank by query_count."""
+        """Run multiple keyword queries; niche (first) query runs first, results prepended.
+
+        Niche query results are placed at the top so high-precision hits (e.g.
+        Psittacara parakeet speciation) are not pushed out by broad-query papers.
+        """
         if not queries:
             return []
         per_query = self._queries_per_variant
-        results = await asyncio.gather(
-            *[
-                # Prefer tight title+abstract matching to avoid famous-but-irrelevant hits.
-                self._openalex_client.search_papers_title_abstract(q, limit=per_query)
-                for q in queries
-            ]
+        niche_limit = min(8, per_query * 2)
+
+        # Run niche (first) query first
+        niche_results = await self._openalex_client.search_papers_title_abstract(
+            queries[0], limit=niche_limit
         )
-        merged = _merge_multiquery_results(list(results), limit)
-        # If we got very few hits, add a broad search fallback and rely on similarity rerank.
-        if len(merged) < max(5, limit // 2):
-            broad = await asyncio.gather(
-                *[self._openalex_client.search_papers(q, limit=per_query) for q in queries]
+        for p in niche_results:
+            p.setdefault("_retrieval_source", "keyword")
+
+        # Run remaining queries in parallel
+        rest_results: list[list[dict]] = []
+        if len(queries) > 1:
+            rest_results = await asyncio.gather(
+                *[
+                    self._openalex_client.search_papers_title_abstract(q, limit=per_query)
+                    for q in queries[1:]
+                ]
             )
-            merged = _merge_multiquery_results(list(results) + list(broad), limit)
-        return merged
+            for result_list in rest_results:
+                for p in result_list:
+                    p.setdefault("_retrieval_source", "keyword")
+
+        # Merge: niche first, then rest (dedupe by paper id)
+        seen: set[str] = set()
+        merged: list[dict] = []
+        for p in niche_results:
+            pid = p.get("id")
+            if pid and str(pid) not in seen:
+                seen.add(str(pid))
+                merged.append(p)
+        if rest_results:
+            rest_merged = _merge_multiquery_results(rest_results, limit)
+            for p in rest_merged:
+                pid = p.get("id")
+                if pid and str(pid) not in seen:
+                    seen.add(str(pid))
+                    merged.append(p)
+
+        if len(merged) < max(5, limit // 2) and queries:
+            broad = await asyncio.gather(
+                *[
+                    self._openalex_client.search_papers(q, limit=per_query)
+                    for q in queries
+                ]
+            )
+            for result_list in broad:
+                for p in result_list:
+                    p.setdefault("_retrieval_source", "keyword")
+            broad_merged = _merge_multiquery_results(broad, limit)
+            for p in broad_merged:
+                pid = p.get("id")
+                if pid and str(pid) not in seen:
+                    seen.add(str(pid))
+                    merged.append(p)
+
+        return merged[:limit]
 
     def _filter_and_rerank_by_local_relevance(
         self,
@@ -698,7 +785,7 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
         When budget low: multi-query keyword only.
         Fallback when empty: full research_question, then ultra-broad.
         """
-        # Build primary_query (for semantic and as one keyword variant)
+        # Build keyword_query from key concepts (targeted for keyword search)
         specific_terms = [
             k for k in (decomposition.key_concepts or [])
             if k and len(k) > 2 and _looks_specific(k)
@@ -710,6 +797,12 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
             primary_query = " ".join(all_concepts[:5])
         else:
             primary_query = _shorten_query(research_question)
+
+        # For semantic search use a richer query closer to the user's proposal
+        semantic_query = research_question.strip()
+        if decomposition.core_questions:
+            semantic_query = f"{research_question} {decomposition.core_questions[0]}"
+        semantic_query = semantic_query[:2000]
 
         limit = self._search_limit
         use_semantic = (
@@ -763,10 +856,9 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
             if use_semantic:
                 remaining = await self._openalex_client.get_remaining_budget_usd()
                 if remaining is not None and remaining >= self._semantic_budget_threshold:
-                    # Hybrid: semantic + multi-query keyword in parallel
                     semantic, keyword = await asyncio.gather(
                         self._openalex_client.search_papers_semantic(
-                            primary_query, limit=limit
+                            semantic_query, limit=limit
                         ),
                         self._run_multiquery_keyword(queries, limit),
                     )
@@ -848,7 +940,7 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
                 )
                 semantic, keyword = await asyncio.gather(
                     self._openalex_client.search_papers_semantic(
-                        primary_query, limit=limit
+                        semantic_query, limit=limit
                     ),
                     keyword_search(primary_query, limit=limit),
                 )
@@ -984,23 +1076,49 @@ Respond with ONLY valid JSON:
             return "LOW"
         return "MEDIUM"
 
-    def _build_citations(self, papers: list[dict]) -> list[Citation]:
-        """Convert paper dicts into Citation models."""
-        citations = []
-        for p in papers:
+    _citation_cap = 10
+
+    def _build_citations(
+        self,
+        papers: list[dict],
+        min_bm25_score: float = 1.2,
+    ) -> list[Citation]:
+        """Convert paper dicts into Citation models, filtering low-relevance papers.
+
+        Only considers the top N papers by BM25 (citation cap) to avoid citing
+        marginal matches. Papers with _bm25_score below min_bm25_score are
+        excluded. If all are filtered, the top 3 are kept as fallback.
+        """
+        def _to_citation(p: dict) -> Citation:
             doi = p.get("doi")
             url = f"https://doi.org/{doi}" if doi else None
-            citations.append(
-                Citation(
-                    title=p.get("title", "Unknown"),
-                    authors=p.get("authors", []),
-                    year=p.get("publication_year"),
-                    doi=doi,
-                    url=url,
-                    fwci=p.get("fwci"),
-                )
+            return Citation(
+                title=p.get("title", "Unknown"),
+                authors=p.get("authors", []),
+                year=p.get("publication_year"),
+                doi=doi,
+                url=url,
+                fwci=p.get("fwci"),
             )
-        return citations
+
+        # Restrict to top N by BM25 so we don't cite marginal matches
+        capped = papers[: self._citation_cap]
+
+        filtered = []
+        for p in capped:
+            bm25 = p.get("_bm25_score")
+            if bm25 is not None and bm25 < min_bm25_score:
+                continue
+            filtered.append(p)
+
+        # Fallback: if all papers were filtered out, keep top 3 by BM25 score
+        if not filtered and capped:
+            sorted_by_bm25 = sorted(
+                capped, key=lambda p: p.get("_bm25_score", 0), reverse=True
+            )
+            filtered = sorted_by_bm25[:3]
+
+        return [_to_citation(p) for p in filtered]
 
     def _build_impact_reasoning(self, stats: dict, impact_level: str) -> str:
         """Build a human-readable impact reasoning string."""
@@ -1039,6 +1157,8 @@ Respond with ONLY valid JSON:
             impact_reasoning="Unable to determine impact due to insufficient data.",
             expected_impact_assessment="UNCERTAIN",
             expected_impact_reasoning="Unable to predict expected impact due to insufficient data.",
+            real_world_impact_assessment="UNCERTAIN",
+            real_world_impact_reasoning="Unable to determine real-world impact due to insufficient data.",
             research_decomposition=decomposition,
         )
 
@@ -1152,6 +1272,82 @@ Respond with ONLY valid JSON (no markdown, no code fences):
         except Exception as e:
             logger.error(f"Expected impact LLM call failed: {e}")
             return "UNCERTAIN", f"Could not predict expected impact: {e}"
+
+    async def _assess_real_world_impact(
+        self,
+        research_question: str,
+        profile: ResearchProfile | None,
+        decomposition: ResearchDecomposition,
+        verdict: str,
+        papers: list[dict],
+    ) -> tuple[str, str]:
+        """Assess real-world (non-academic) impact using deliberately harsh criteria.
+
+        Separate from field impact: asks whether answering the question changes
+        the lives of non-specialists, creates new tools/methods, or affects
+        policy/practice at scale.
+
+        Returns:
+            Tuple of (impact_level, reasoning).
+        """
+        impact_domains = ", ".join(decomposition.potential_impact_domains) or "Not specified"
+        skills_text = ""
+        if profile:
+            skills_text = f"Skills: {', '.join(profile.skills)}" if profile.skills else ""
+
+        prompt = f"""Assess the REAL-WORLD impact of this research — NOT its academic/field impact.
+
+Research Question: {research_question}
+Potential Impact Domains: {impact_domains}
+Researcher: {skills_text or 'Not specified'}
+Novelty Verdict: {verdict}
+
+Apply these HARSH criteria. Be a skeptic, not a cheerleader:
+
+1. SCALE: What fraction of the world's 8 billion people are affected?
+   - Billions (disease, food, energy) = HIGH
+   - Millions (specific medical condition, regional policy) = MEDIUM
+   - Thousands or fewer (niche species, narrow subfield) = LOW
+
+2. TOOLING: Does this create a new method, tool, framework, or dataset that others OUTSIDE the subfield can use?
+   - Yes, broadly applicable = boosts toward HIGH
+   - No, only advances internal subfield knowledge = does not boost
+
+3. NEWS TEST: Would a non-specialist journalist write about this result?
+   - Front page of a major newspaper = HIGH
+   - Science section of a newspaper = MEDIUM
+   - Only in a specialist journal = LOW
+
+4. COMPARE to these benchmarks:
+   - HIGH: Curing a disease, discovering a new material, preventing famine, new energy source
+   - MEDIUM: Improving crop yields 10%, better diagnostic for a common condition, new conservation strategy for an endangered ecosystem
+   - LOW: Speciating a particular bird species, incremental taxonomy revision, method applied to new population with no broader consequence
+
+5. HONESTY CHECK: If the researcher never did this work, would anyone outside their lab notice within 5 years?
+
+Respond with ONLY valid JSON:
+{{"real_world_impact": "HIGH|MEDIUM|LOW", "reasoning": "Be specific: who benefits, how many, and to what degree. Name concrete consequences or their absence."}}"""
+
+        try:
+            response = await self._openai_client.chat.completions.create(
+                model=self._openai_model,
+                messages=[
+                    {"role": "system", "content": EXPERT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=400,
+            )
+            content = response.choices[0].message.content.strip()
+            result = json.loads(content)
+            impact = result.get("real_world_impact", "LOW")
+            reasoning = result.get("reasoning", "No reasoning provided.")
+            if impact not in ("HIGH", "MEDIUM", "LOW"):
+                impact = "LOW"  # Default to LOW when uncertain — harsh by design
+            return impact, reasoning
+        except Exception as e:
+            logger.error(f"Real-world impact LLM call failed: {e}")
+            return "UNCERTAIN", f"Could not assess real-world impact: {e}"
 
     def _format_paper_summary(self, paper: dict, include_topic: bool = False) -> str:
         """Format a single paper for LLM prompts."""

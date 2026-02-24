@@ -7,10 +7,10 @@ ranking by relevance × impact potential.
 
 import json
 import logging
-import os
 
 from openai import AsyncOpenAI
 
+from app.config import get_settings
 from app.debug_log import debug_log
 from app.models.schemas import (
     GapMapEntry,
@@ -39,24 +39,35 @@ class PivotMatcher:
         self._client = openai_client
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call the LLM with a prompt and return the response content."""
+        """Call the LLM with structured JSON output and a single retry on parse failure."""
         if self._client is None:
-            debug_log(
-                location="app/services/pivot_matcher.py:PivotMatcher:_call_llm:init_client",
-                message="Initializing OpenAI client for pivot matcher",
-                data={"has_openai_api_key_env": bool(os.getenv("OPENAI_API_KEY"))},
-                run_id="pre-fix",
-                hypothesis_id="H2_OPENAI_KEY_NOT_WIRED",
-            )
-            self._client = AsyncOpenAI()
+            self._client = AsyncOpenAI(api_key=get_settings().openai_api_key)
 
-        response = await self._client.chat.completions.create(
-            model="gpt-4-0125-preview",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            max_tokens=2000,
-        )
-        return response.choices[0].message.content or ""
+        settings = get_settings()
+        for attempt in range(2):
+            response = await self._client.chat.completions.create(
+                model=settings.openai_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4,
+                max_tokens=2000,
+                response_format={"type": "json_object"},
+                timeout=60,
+            )
+            content = response.choices[0].message.content or ""
+            try:
+                json.loads(content)
+                return content
+            except json.JSONDecodeError:
+                if attempt == 0:
+                    logger.warning("LLM returned invalid JSON, retrying with strict prompt")
+                    prompt = (
+                        "Your previous response was not valid JSON. "
+                        "Return ONLY a valid JSON array. No markdown, no explanation.\n\n"
+                        + prompt
+                    )
+                    continue
+                return "[]"
+        return "[]"
 
     async def match_pivots(
         self,
@@ -86,13 +97,14 @@ class PivotMatcher:
         try:
             prompt = self._build_prompt(profile, novelty, gap_entries)
             llm_response = await self._call_llm(prompt)
-            return self._parse_response(llm_response, gap_entries, top_n)
+            suggestions = self._parse_response(llm_response, gap_entries, top_n)
+            return suggestions
         except Exception:
             debug_log(
                 location="app/services/pivot_matcher.py:PivotMatcher:match_pivots:exception",
                 message="Pivot matcher failed (exception only)",
-                data={"has_openai_api_key_env": bool(os.getenv("OPENAI_API_KEY"))},
-                run_id="pre-fix",
+                data={"client_initialized": self._client is not None},
+                run_id="post-fix",
                 hypothesis_id="H2_OPENAI_KEY_NOT_WIRED",
             )
             logger.exception("Error in pivot matching")

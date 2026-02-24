@@ -131,33 +131,38 @@ describe('API Client', () => {
       expect(result).toEqual(mockResult)
     })
 
-    it('returns ResearchRecommendation directly', async () => {
+    it('returns SessionStatusResponse with result', async () => {
       const mockResult = {
-        recommendation: 'CONTINUE',
-        confidence: 0.85,
-        narrative_report: '# Report',
-        novelty_assessment: {
-          score: 0.7,
-          verdict: 'NOVEL',
-          evidence: [],
-          reasoning: 'Novel research',
-          related_papers_count: 5,
-          average_fwci: 1.5,
-          fwci_percentile: 75.0,
-          citation_percentile_min: 60,
-          citation_percentile_max: 90,
-          impact_assessment: 'HIGH',
-          impact_reasoning: 'High impact area',
+        session_id: 'abc-123',
+        status: 'completed',
+        result: {
+          recommendation: 'CONTINUE',
+          confidence: 0.85,
+          narrative_report: '# Report',
+          novelty_assessment: {
+            score: 0.7,
+            verdict: 'NOVEL',
+            evidence: [],
+            reasoning: 'Novel research',
+            related_papers_count: 5,
+            average_fwci: 1.5,
+            fwci_percentile: 75.0,
+            citation_percentile_min: 60,
+            citation_percentile_max: 90,
+            impact_assessment: 'HIGH',
+            impact_reasoning: 'High impact area',
+          },
+          pivot_suggestions: [],
+          evidence_citations: [],
         },
-        pivot_suggestions: [],
-        evidence_citations: [],
+        error_message: null,
       }
       mockClient.get.mockResolvedValueOnce({ data: mockResult })
 
       const result = await getAnalysis('abc-123')
 
-      expect(result.recommendation).toBe('CONTINUE')
-      expect(result.narrative_report).toBe('# Report')
+      expect(result.status).toBe('completed')
+      expect(result.result?.recommendation).toBe('CONTINUE')
     })
 
     it('propagates errors from the API', async () => {
