@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "railway:deploy": "cd research-advisor-backend && bash scripts/railway_deploy.sh"
+  },
+  "devDependencies": {
+    "@railway/cli": "^4.30.5"
+  }
+}
