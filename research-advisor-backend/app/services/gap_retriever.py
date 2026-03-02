@@ -13,6 +13,15 @@ _TAXONOMY_BOOST_SAME_SUBFIELD = 0.15
 _TAXONOMY_BOOST_SAME_FIELD = 0.10
 _TAXONOMY_BOOST_SAME_DOMAIN = 0.05
 
+# True research gaps (Convergent, Homeworld, 3ie) prioritized over open questions (Wikenigma)
+_SOURCE_PRIORITY_BOOST = 0.12
+_PRIORITY_SOURCES = frozenset({"convergent", "homeworld", "3ie"})
+
+
+def _source_boost(entry: GapMapEntry) -> float:
+    """Boost for true research gaps over open-question sources like Wikenigma."""
+    return _SOURCE_PRIORITY_BOOST if entry.source in _PRIORITY_SOURCES else 0.0
+
 
 def _query_text_from_profile(profile: ResearchProfile) -> str:
     """Build query text from research profile for embedding."""
@@ -91,9 +100,26 @@ class GapRetriever:
             entries = [e.to_pydantic() for e in db_entries[:top_k]]
             return self._apply_taxonomy_boost(entries, novelty, top_k)
 
-        db_entries = await self._repository.get_similar_to_embedding(
-            query_embedding, limit=top_k
-        )
+        # Validate embedding format for pgvector (list of 1536 floats)
+        if not (
+            isinstance(query_embedding, list)
+            and len(query_embedding) == 1536
+            and all(isinstance(x, (int, float)) for x in query_embedding)
+        ):
+            logger.warning(
+                "Invalid query embedding (expected list of 1536 numbers), falling back to get_all"
+            )
+            db_entries = await self._repository.get_all()
+            entries = [e.to_pydantic() for e in db_entries[:top_k]]
+            return self._apply_taxonomy_boost(entries, novelty, top_k)
+
+        try:
+            db_entries = await self._repository.get_similar_to_embedding(
+                query_embedding, limit=top_k
+            )
+        except Exception as e:
+            logger.warning("Vector search failed (%s), falling back to get_all", e)
+            db_entries = await self._repository.get_all()
 
         if not db_entries:
             db_entries = await self._repository.get_all()
@@ -139,20 +165,27 @@ class GapRetriever:
         novelty: NoveltyAssessment,
         top_k: int,
     ) -> list[GapMapEntry]:
-        """Reorder entries by taxonomy boost (preserving original relative order as tiebreaker)."""
+        """Reorder entries by taxonomy boost + source priority (preserving original order as tiebreaker).
+
+        Taxonomy: entries in researcher's subfield/field/domain rank higher.
+        Source: Convergent, Homeworld, 3ie (true research gaps) rank higher than Wikenigma (open questions).
+        """
         classification = novelty.researcher_classification
-        if not classification or not (classification.primary_field or classification.primary_domain):
-            return entries[:top_k]
+        taxonomy_domain = classification.primary_domain if classification else None
+        taxonomy_field = classification.primary_field if classification else None
+        taxonomy_subfield = classification.primary_subfield if classification else None
 
         scored = []
         for idx, entry in enumerate(entries):
-            boost = _taxonomy_boost(
+            tax_boost = _taxonomy_boost(
                 entry,
-                classification.primary_domain,
-                classification.primary_field,
-                classification.primary_subfield,
+                taxonomy_domain,
+                taxonomy_field,
+                taxonomy_subfield,
             )
-            scored.append((-boost, idx, entry))
+            src_boost = _source_boost(entry)
+            total_boost = tax_boost + src_boost
+            scored.append((-total_boost, idx, entry))
 
         scored.sort(key=lambda x: (x[0], x[1]))
         return [e for _, _, e in scored[:top_k]]

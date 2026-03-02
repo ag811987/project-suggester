@@ -29,9 +29,6 @@ const mockRecommendation: ResearchRecommendation = {
     fwci_percentile: 82.5,
     citation_percentile_min: 65,
     citation_percentile_max: 95,
-    impact_assessment: 'HIGH',
-    impact_reasoning:
-      'High FWCI indicates strong impact potential in this research area.',
     expected_impact_assessment: 'HIGH',
     expected_impact_reasoning:
       'The researcher has strong skills and the field has room for novel contributions.',
@@ -120,15 +117,6 @@ describe('ResultsView', () => {
     const section = screen.getByTestId('expected-impact-section')
     expect(section).toBeInTheDocument()
     expect(section).toHaveTextContent('Impact on the field')
-  })
-
-  it('shows field impact as secondary context', () => {
-    render(<ResultsView data={mockRecommendation} sessionId="test-session-123" />)
-    expect(
-      screen.getByText(
-        'High FWCI indicates strong impact potential in this research area.',
-      ),
-    ).toBeInTheDocument()
   })
 
   it('shows alternative direction for CONTINUE recommendation with pivots', () => {

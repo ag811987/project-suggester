@@ -1,5 +1,15 @@
 # Quick Start Guide - Build in 1 Hour
 
+## Just Running Locally?
+
+If you cloned this repo and want to **run the app** (not build from scratch), follow the [root README](../README.md) Quick Start. You need:
+
+- Docker (PostgreSQL + Redis)
+- Poetry, Python 3.11+, Node.js 18+
+- `OPENAI_API_KEY` and `OPENALEX_EMAIL` in `.env`
+
+---
+
 ## For the Engineer: How to Actually Build This
 
 You're about to use Claude Code to build an entire application in ~1 hour. This guide tells you exactly what to do.

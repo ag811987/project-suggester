@@ -4,6 +4,7 @@ import type { ChatMessage } from './components/chat-interface'
 import { LandingHero } from './components/landing-hero'
 import { ResultsView } from './components/results-view'
 import { useAnalyzeResearch, useGetAnalysis, STAGE_LABELS } from './hooks/useAnalysis'
+import { getAnalysis } from './api/client'
 
 type View = 'landing' | 'chat' | 'results'
 
@@ -65,15 +66,25 @@ function App() {
   const analyzeMutation = useAnalyzeResearch()
   const { data: analysisData, error: analysisError } = useGetAnalysis(sessionId)
 
-  // On mount: check for ?session= param to restore a shared/bookmarked result
+  // On mount: validate ?session= param before enabling polling
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sid = params.get('session')
-    if (sid) {
-      setSessionId(sid)
-      setStep(4)
-      setView('results')
-    }
+    if (!sid) return
+    let cancelled = false
+    getAnalysis(sid)
+      .then(() => {
+        if (cancelled) return
+        setSessionId(sid)
+        setStep(4)
+        setView('results')
+      })
+      .catch(() => {
+        const url = new URL(window.location.href)
+        url.searchParams.delete('session')
+        window.history.replaceState({}, '', url.toString())
+      })
+    return () => { cancelled = true }
   }, [])
 
   // When results are showing, keep URL in sync with session ID
@@ -247,10 +258,10 @@ function App() {
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {backendError
               ? backendError
-              : mutationError instanceof Error
-                ? mutationError.message
-                : analysisError instanceof Error
-                  ? analysisError.message
+              : typeof (mutationError as Error | null)?.message === 'string'
+                ? (mutationError as Error).message
+                : typeof (analysisError as Error | { message?: string } | null)?.message === 'string'
+                  ? (analysisError as { message: string }).message
                   : 'An error occurred during analysis.'}
           </div>
         </div>

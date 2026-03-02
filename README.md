@@ -38,10 +38,16 @@ An AI-powered research advisor that analyzes academic research questions for nov
 
 ## Prerequisites
 
-- **Python 3.11+**
-- **Node.js 18+**
-- **Docker & Docker Compose** (for PostgreSQL and Redis)
-- **Poetry** (Python dependency manager)
+Before running locally, ensure you have:
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| **Python** | 3.11+ | Backend runtime |
+| **Node.js** | 18+ | Frontend build |
+| **Docker & Docker Compose** | — | PostgreSQL and Redis |
+| **Poetry** | — | Python dependency manager |
+
+**Install Poetry** (if needed): `curl -sSL https://install.python-poetry.org | python3 -`
 
 ## Quick Start
 
@@ -53,31 +59,39 @@ cd Project-Suggester
 cp .env.example .env
 ```
 
-Edit `.env` and set your API keys:
+Edit `.env` and set the **required** API keys (the app will not start without these):
+
 ```bash
-OPENAI_API_KEY=sk-your-key-here
-OPENALEX_EMAIL=your.email@example.com
+OPENAI_API_KEY=sk-your-key-here    # Get from https://platform.openai.com/api-keys
+OPENALEX_EMAIL=your.email@example.com   # Any email for OpenAlex polite pool
 ```
 
-### 2. Start Infrastructure Services
+The default `DATABASE_URL` and `REDIS_URL` point to local Docker services — no changes needed if using Docker.
+
+### 2. Start Infrastructure (PostgreSQL + Redis)
 
 ```bash
 docker-compose up -d
 ```
 
-This starts PostgreSQL 15 and Redis 7 with health checks.
+This starts PostgreSQL 15 (with pgvector) and Redis 7. Verify with `docker ps` — both containers should be healthy.
 
 ### 3. Install & Start Backend
 
 ```bash
 cd research-advisor-backend
 poetry install
+poetry run alembic upgrade head   # Create database tables (required on first run)
 poetry run uvicorn app.main:app --reload
 ```
 
 The API is available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
+On first startup, if the gap map database is empty, the backend will automatically seed it with sample data from curated sources.
+
 ### 4. Install & Start Frontend
+
+In a **new terminal**:
 
 ```bash
 cd research-advisor-frontend
@@ -151,6 +165,17 @@ See [.env.example](.env.example) for all configuration options.
 | `OPENALEX_API_KEY` | — | OpenAlex API key (improves rate limits) |
 | `OXYLABS_USERNAME` | — | Oxylabs proxy username |
 | `OXYLABS_PASSWORD` | — | Oxylabs proxy password |
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| **Backend fails to start** | Ensure `OPENAI_API_KEY` and `OPENALEX_EMAIL` are set in `.env`. Check Docker: `docker ps` — PostgreSQL and Redis must be running. |
+| **"Table gap_map_entries does not exist"** | Run migrations: `cd research-advisor-backend && poetry run alembic upgrade head` |
+| **PostgreSQL connection refused** | Start Docker: `docker-compose up -d`. Wait ~10 seconds for health checks, then retry. |
+| **Redis connection refused** | Same as above — ensure `docker-compose up -d` has completed. |
+| **Frontend can't reach API** | Backend must run on port 8000. The frontend uses `http://localhost:8000/api/v1` by default. |
+| **Poetry not found** | Install from [python-poetry.org](https://python-poetry.org/docs/#installation) |
 
 ## Privacy & Data Handling
 

@@ -13,17 +13,11 @@ from app.models.schemas import NoveltyAssessment, ResearchDecomposition
 
 @pytest.fixture
 def analyzer():
-    """Create a NoveltyAnalyzer instance for testing.
-
-    Uses legacy FWCI thresholds (1.5, 0.8) to match test expectations.
-    Production defaults are stricter (2.2, 1.2); see docs/FWCI_CALIBRATION.md.
-    """
+    """Create a NoveltyAnalyzer instance for testing."""
     return NoveltyAnalyzer(
         openalex_email="test@example.com",
         openai_api_key="test-key",
-        fwci_high_threshold=1.5,
-        fwci_low_threshold=0.8,
-        search_limit=25,  # tests expect 25 papers from mock
+        search_limit=25,
     )
 
 
@@ -158,47 +152,6 @@ def _mock_decomposition():
     )
 
 
-class TestImpactAssessment:
-    """Tests for impact assessment based on FWCI thresholds."""
-
-    def test_high_impact_from_high_fwci(self, analyzer):
-        avg_fwci = 2.5  # > 1.5
-        impact = analyzer._determine_impact_level(avg_fwci)
-        assert impact == "HIGH"
-
-    def test_medium_impact_from_medium_fwci(self, analyzer):
-        avg_fwci = 1.1  # 0.8–1.5
-        impact = analyzer._determine_impact_level(avg_fwci)
-        assert impact == "MEDIUM"
-
-    def test_low_impact_from_low_fwci(self, analyzer):
-        avg_fwci = 0.4  # < 0.8
-        impact = analyzer._determine_impact_level(avg_fwci)
-        assert impact == "LOW"
-
-    def test_uncertain_impact_when_none_fwci(self, analyzer):
-        impact = analyzer._determine_impact_level(None)
-        assert impact == "UNCERTAIN"
-
-    def test_boundary_high_medium(self, analyzer):
-        # 1.5 is the threshold — exactly 1.5 should be MEDIUM
-        impact = analyzer._determine_impact_level(1.5)
-        assert impact == "MEDIUM"
-
-    def test_boundary_medium_low(self, analyzer):
-        # 0.8 is the threshold — exactly 0.8 should be MEDIUM
-        impact = analyzer._determine_impact_level(0.8)
-        assert impact == "MEDIUM"
-
-    def test_just_above_high_threshold(self, analyzer):
-        impact = analyzer._determine_impact_level(1.51)
-        assert impact == "HIGH"
-
-    def test_just_below_low_threshold(self, analyzer):
-        impact = analyzer._determine_impact_level(0.79)
-        assert impact == "LOW"
-
-
 class TestNoveltyVerdict:
     """Tests for novelty verdict determination logic."""
 
@@ -215,8 +168,6 @@ class TestNoveltyVerdict:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -224,7 +175,6 @@ class TestNoveltyVerdict:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("HIGH", "High impact field.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
             mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
@@ -247,8 +197,6 @@ class TestNoveltyVerdict:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -256,7 +204,6 @@ class TestNoveltyVerdict:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("LOW")
             mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
@@ -278,8 +225,6 @@ class TestNoveltyVerdict:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -287,7 +232,6 @@ class TestNoveltyVerdict:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = medium_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("MEDIUM", "Medium impact.")
             mock_impact.return_value = _mock_expected_impact("LOW")
             mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
@@ -310,7 +254,6 @@ class TestNoveltyVerdict:
             result = await analyzer.analyze("some research question")
 
         assert result.verdict == "UNCERTAIN"
-        assert result.impact_assessment == "UNCERTAIN"
         assert result.expected_impact_assessment == "UNCERTAIN"
         assert result.real_world_impact_assessment == "UNCERTAIN"
 
@@ -329,8 +272,6 @@ class TestFWCIIntegration:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -338,14 +279,12 @@ class TestFWCIIntegration:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
             mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
             result = await analyzer.analyze("quantum computing")
 
         assert result.average_fwci == pytest.approx(2.5, abs=0.01)
-        assert result.impact_assessment == "HIGH"
         assert result.related_papers_count == 2
 
     @pytest.mark.asyncio
@@ -359,8 +298,6 @@ class TestFWCIIntegration:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -368,14 +305,12 @@ class TestFWCIIntegration:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = medium_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("MEDIUM", "Medium impact.")
             mock_impact.return_value = _mock_expected_impact("MEDIUM")
             mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
             result = await analyzer.analyze("some topic")
 
         assert result.average_fwci == pytest.approx(1.1, abs=0.01)
-        assert result.impact_assessment == "MEDIUM"
 
     @pytest.mark.asyncio
     async def test_low_fwci_papers_stats(self, analyzer, low_fwci_papers):
@@ -388,8 +323,6 @@ class TestFWCIIntegration:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -397,14 +330,12 @@ class TestFWCIIntegration:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = low_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("LOW", "Low impact.")
             mock_impact.return_value = _mock_expected_impact("LOW")
             mock_rw_impact.return_value = ("LOW", "Low real-world impact.")
 
             result = await analyzer.analyze("obscure topic")
 
         assert result.average_fwci == pytest.approx(0.4, abs=0.01)
-        assert result.impact_assessment == "LOW"
 
     @pytest.mark.asyncio
     async def test_none_fwci_papers_stats(self, analyzer, none_fwci_papers):
@@ -416,8 +347,6 @@ class TestFWCIIntegration:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -425,14 +354,12 @@ class TestFWCIIntegration:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = none_fwci_papers
             mock_llm.return_value = _mock_llm_response("UNCERTAIN", 0.5, "Insufficient data.")
-            mock_impact_llm.return_value = ("UNCERTAIN", "No FWCI data.")
             mock_impact.return_value = _mock_expected_impact("UNCERTAIN", "Cannot assess.")
             mock_rw_impact.return_value = ("UNCERTAIN", "Cannot assess real-world impact.")
 
             result = await analyzer.analyze("topic with no metrics")
 
         assert result.average_fwci is None
-        assert result.impact_assessment == "UNCERTAIN"
 
     @pytest.mark.asyncio
     async def test_mixed_fwci_papers(self, analyzer):
@@ -472,8 +399,6 @@ class TestFWCIIntegration:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -481,15 +406,12 @@ class TestFWCIIntegration:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
             mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
             result = await analyzer.analyze("mixed fwci topic")
 
-        # Only the paper with FWCI=2.0 should be averaged
         assert result.average_fwci == pytest.approx(2.0)
-        assert result.impact_assessment == "HIGH"
         assert result.related_papers_count == 2
 
 
@@ -507,8 +429,6 @@ class TestEvidenceCitations:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -516,7 +436,6 @@ class TestEvidenceCitations:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("HIGH")
             mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
@@ -558,7 +477,6 @@ class TestAnalyzerErrorHandling:
             result = await analyzer.analyze("test")
 
         assert result.verdict == "UNCERTAIN"
-        assert result.impact_assessment == "UNCERTAIN"
         assert result.expected_impact_assessment == "UNCERTAIN"
 
     @pytest.mark.asyncio
@@ -570,8 +488,6 @@ class TestAnalyzerErrorHandling:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -579,7 +495,6 @@ class TestAnalyzerErrorHandling:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.side_effect = Exception("LLM failure")
-            mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = _mock_expected_impact("UNCERTAIN", "Cannot assess.")
             mock_rw_impact.return_value = ("UNCERTAIN", "Cannot assess real-world impact.")
 
@@ -604,8 +519,6 @@ class TestExpectedImpact:
         ) as mock_search, patch.object(
             analyzer, "_get_llm_verdict", new_callable=AsyncMock
         ) as mock_llm, patch.object(
-            analyzer, "_assess_impact_llm", new_callable=AsyncMock
-        ) as mock_impact_llm, patch.object(
             analyzer, "_assess_expected_impact", new_callable=AsyncMock
         ) as mock_impact, patch.object(
             analyzer, "_assess_real_world_impact", new_callable=AsyncMock
@@ -613,7 +526,6 @@ class TestExpectedImpact:
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = high_fwci_papers
             mock_llm.return_value = llm_response
-            mock_impact_llm.return_value = ("HIGH", "High impact.")
             mock_impact.return_value = ("HIGH", "Strong expected impact due to novel approach.")
             mock_rw_impact.return_value = ("MEDIUM", "Moderate real-world impact.")
 
@@ -742,19 +654,17 @@ class TestMergePapers:
 
 
 class TestSearchPapersHybrid:
-    """Tests for hybrid semantic + keyword search with budget fallback."""
+    """Tests for semantic-only paper search with budget fallback."""
 
     @pytest.fixture
     def hybrid_analyzer(self):
-        """Analyzer with semantic search enabled and API key."""
+        """Analyzer with semantic search enabled and API key (semantic_only default True)."""
         return NoveltyAnalyzer(
             openalex_email="test@example.com",
             openai_api_key="test-key",
             openalex_api_key="test-openalex-key",
             use_semantic_search=True,
             semantic_budget_threshold=0.05,
-            fwci_high_threshold=1.5,
-            fwci_low_threshold=0.8,
             search_limit=8,
         )
 
@@ -769,9 +679,8 @@ class TestSearchPapersHybrid:
 
     @pytest.mark.asyncio
     async def test_hybrid_path_when_budget_high(self, hybrid_analyzer, mock_decomposition):
-        """When budget >= threshold, runs semantic + multi-query keyword in parallel."""
+        """When budget >= threshold, uses semantic search only (no keyword merge)."""
         semantic_papers = [{"id": "W1", "title": "Semantic Paper"}]
-        keyword_papers = [{"id": "W2", "title": "Keyword Paper"}]
 
         with patch.object(
             hybrid_analyzer._openalex_client,
@@ -787,22 +696,19 @@ class TestSearchPapersHybrid:
             hybrid_analyzer._openalex_client,
             "search_papers",
             new_callable=AsyncMock,
-            return_value=keyword_papers,
         ) as mock_keyword:
             papers = await hybrid_analyzer._search_papers("question", mock_decomposition)
 
         mock_semantic.assert_called_once()
-        # Semantic query should use the full research question, not just key concepts
         semantic_call_query = mock_semantic.call_args[0][0]
         assert "question" in semantic_call_query
-        mock_keyword.assert_called()
-        assert len(papers) == 2
-        ids = [p["id"] for p in papers]
-        assert "W1" in ids and "W2" in ids
+        mock_keyword.assert_not_called()
+        assert len(papers) == 1
+        assert papers[0]["id"] == "W1"
 
     @pytest.mark.asyncio
     async def test_keyword_only_when_budget_low(self, hybrid_analyzer, mock_decomposition):
-        """When budget < threshold, uses keyword-only multi-query flow."""
+        """When budget < threshold, skips semantic and uses keyword fallback (title_abstract)."""
         keyword_papers = [
             {"id": "W1", "title": "Keyword 1"},
             {"id": "W2", "title": "Keyword 2"},
@@ -820,20 +726,20 @@ class TestSearchPapersHybrid:
             new_callable=AsyncMock,
         ) as mock_semantic, patch.object(
             hybrid_analyzer._openalex_client,
-            "search_papers",
+            "search_papers_title_abstract",
             new_callable=AsyncMock,
             return_value=keyword_papers,
-        ) as mock_keyword:
+        ) as mock_title_abstract:
             papers = await hybrid_analyzer._search_papers("question", mock_decomposition)
 
         mock_semantic.assert_not_called()
-        mock_keyword.assert_called()
+        mock_title_abstract.assert_called_once()
         assert len(papers) == 3
         assert [p["id"] for p in papers] == ["W1", "W2", "W3"]
 
     @pytest.mark.asyncio
     async def test_keyword_only_when_budget_none(self, hybrid_analyzer, mock_decomposition):
-        """When get_remaining_budget_usd returns None, uses keyword-only multi-query."""
+        """When get_remaining_budget_usd returns None, tries semantic first; fallback to keyword if semantic returns empty."""
         keyword_papers = [
             {"id": "W1", "title": "K1"},
             {"id": "W2", "title": "K2"},
@@ -849,14 +755,15 @@ class TestSearchPapersHybrid:
             hybrid_analyzer._openalex_client,
             "search_papers_semantic",
             new_callable=AsyncMock,
+            return_value=[],
         ) as mock_semantic, patch.object(
             hybrid_analyzer._openalex_client,
-            "search_papers",
+            "search_papers_title_abstract",
             new_callable=AsyncMock,
             return_value=keyword_papers,
-        ) as mock_keyword:
+        ) as mock_title_abstract:
             papers = await hybrid_analyzer._search_papers("question", mock_decomposition)
 
-        mock_semantic.assert_not_called()
-        mock_keyword.assert_called()
+        mock_semantic.assert_called_once()
+        mock_title_abstract.assert_called_once()
         assert len(papers) == 3

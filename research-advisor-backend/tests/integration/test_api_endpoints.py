@@ -52,8 +52,6 @@ def _sample_novelty() -> NoveltyAssessment:
         fwci_percentile=0.67,
         citation_percentile_min=35,
         citation_percentile_max=95,
-        impact_assessment="MEDIUM",
-        impact_reasoning="Moderate impact area.",
         expected_impact_assessment="MEDIUM",
         expected_impact_reasoning="Moderate expected impact.",
     )

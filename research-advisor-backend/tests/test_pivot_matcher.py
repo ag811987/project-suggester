@@ -326,3 +326,111 @@ class TestPivotMatcher:
 
         assert len(result) == 1
         assert result[0].relevance_score <= 1.0
+
+
+class TestParseResponse:
+    """Unit tests for PivotMatcher._parse_response."""
+
+    def test_valid_json_array(
+        self,
+        pivot_matcher,
+        sample_gap_map_entries,
+    ):
+        """Valid JSON array of objects is parsed correctly."""
+        response = json.dumps([
+            {
+                "gap_index": 0,
+                "relevance_score": 0.8,
+                "impact_potential": "HIGH",
+                "match_reasoning": "Match",
+                "feasibility_for_researcher": "Feasible",
+                "impact_rationale": "Impact",
+            },
+        ])
+        result = pivot_matcher._parse_response(
+            response, sample_gap_map_entries, top_n=5
+        )
+        assert len(result) == 1
+        assert result[0].gap_entry.title == "Scalable Production of Cell Therapies"
+        assert result[0].relevance_score == 0.8
+
+    def test_wrapped_object_suggestions_key(
+        self,
+        pivot_matcher,
+        sample_gap_map_entries,
+    ):
+        """Object with list under 'suggestions' key is unwrapped."""
+        response = json.dumps({
+            "suggestions": [
+                {
+                    "gap_index": 1,
+                    "relevance_score": 0.7,
+                    "impact_potential": "MEDIUM",
+                    "match_reasoning": "Match",
+                    "feasibility_for_researcher": "Feasible",
+                    "impact_rationale": "Impact",
+                },
+            ],
+        })
+        result = pivot_matcher._parse_response(
+            response, sample_gap_map_entries, top_n=5
+        )
+        assert len(result) == 1
+        assert result[0].gap_entry.title == "Protein Design for Novel Functions"
+
+    def test_wrapped_object_items_key(
+        self,
+        pivot_matcher,
+        sample_gap_map_entries,
+    ):
+        """Object with list under 'items' key is unwrapped."""
+        response = json.dumps({
+            "items": [
+                {
+                    "gap_index": 0,
+                    "relevance_score": 0.9,
+                    "impact_potential": "HIGH",
+                    "match_reasoning": "M",
+                    "feasibility_for_researcher": "F",
+                    "impact_rationale": "I",
+                },
+            ],
+        })
+        result = pivot_matcher._parse_response(
+            response, sample_gap_map_entries, top_n=5
+        )
+        assert len(result) == 1
+        assert result[0].relevance_score == 0.9
+
+    def test_invalid_json_returns_empty(
+        self,
+        pivot_matcher,
+        sample_gap_map_entries,
+    ):
+        """Invalid JSON returns empty list."""
+        result = pivot_matcher._parse_response(
+            "not valid json", sample_gap_map_entries, top_n=5
+        )
+        assert result == []
+
+    def test_non_array_non_wrapped_object_returns_empty(
+        self,
+        pivot_matcher,
+        sample_gap_map_entries,
+    ):
+        """Object without list under known keys returns empty list."""
+        result = pivot_matcher._parse_response(
+            '{"key": "val"}', sample_gap_map_entries, top_n=5
+        )
+        assert result == []
+
+    def test_non_list_type_returns_empty(
+        self,
+        pivot_matcher,
+        sample_gap_map_entries,
+    ):
+        """Non-array, non-dict (e.g. string, number) returns empty list."""
+        result = pivot_matcher._parse_response(
+            '"just a string"', sample_gap_map_entries, top_n=5
+        )
+        assert result == []

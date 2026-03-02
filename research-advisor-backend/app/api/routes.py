@@ -3,13 +3,11 @@
 import asyncio
 import io
 import json
-import uuid
 import logging
 import time
+import uuid
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import JSONResponse
-
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from openai import AsyncOpenAI
 
 from app.config import get_settings
@@ -21,13 +19,14 @@ from app.models.schemas import (
     SessionStatusResponse,
 )
 from app.services.document_parser import DocumentParser
-from app.services.info_collector import InfoCollectionService
-from app.services.novelty_analyzer import NoveltyAnalyzer
 from app.services.embedding_service import EmbeddingService
 from app.services.gap_map_repository import GapMapRepository
 from app.services.gap_retriever import GapRetriever
+from app.services.info_collector import InfoCollectionService
+from app.services.novelty_analyzer import NoveltyAnalyzer
 from app.services.pivot_matcher import PivotMatcher
 from app.services.report_generator import ReportGenerator
+from app.services.shared_analysis_repository import SharedAnalysisRepository
 from app.services.web_search_client import WebSearchClient
 
 logger = logging.getLogger(__name__)
@@ -38,6 +37,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _set_stage(redis, session_id: str, stage: str, ttl: int) -> None:
     """Update the session stage in Redis (metadata only, no user data)."""
@@ -94,11 +94,11 @@ async def _run_pipeline(
             openai_model=settings.openai_model,
             use_semantic_search=settings.openalex_use_semantic_search,
             semantic_budget_threshold=settings.openalex_semantic_budget_threshold,
+            semantic_only=settings.openalex_semantic_only,
+            condense_query_threshold=settings.openalex_condense_query_threshold,
             multi_query=settings.openalex_multi_query,
             queries_per_variant=settings.openalex_queries_per_variant,
             use_embedding_rerank=settings.openalex_use_embedding_rerank,
-            fwci_high_threshold=settings.fwci_high_threshold,
-            fwci_low_threshold=settings.fwci_low_threshold,
             search_limit=settings.openalex_search_limit,
         )
         novelty = await novelty_analyzer.analyze(
@@ -108,7 +108,7 @@ async def _run_pipeline(
         # -- Stage 3: Supplemental web search (when signal is ambiguous) --
         await _set_stage(redis, session_id, "web_search", ttl)
         web_search_result = None
-        if novelty.verdict == "UNCERTAIN" or novelty.impact_assessment == "UNCERTAIN":
+        if novelty.verdict == "UNCERTAIN" or novelty.expected_impact_assessment == "UNCERTAIN":
             try:
                 ws = WebSearchClient(
                     openai_client=AsyncOpenAI(api_key=settings.openai_api_key),
@@ -135,7 +135,17 @@ async def _run_pipeline(
                     merged_profile, novelty, limit=settings.gap_retrieval_top_k
                 )
         except Exception as e:
-            logger.warning("Gap retrieval failed: %s", type(e).__name__)
+            logger.exception("Gap retrieval failed: %s", e)
+            # Fallback: return up to top_k from get_all so pipeline still yields pivots
+            try:
+                async with db_session_factory() as session:
+                    repo = GapMapRepository(session)
+                    db_entries = await repo.get_all()
+                    gap_entries = [
+                        e.to_pydantic() for e in db_entries[: settings.gap_retrieval_top_k]
+                    ]
+            except Exception as fallback_err:
+                logger.warning("Gap retrieval fallback failed: %s", fallback_err)
 
         # Log gap map retrieval for debugging (public data only)
         if gap_entries:
@@ -151,9 +161,7 @@ async def _run_pipeline(
         await _set_stage(redis, session_id, "matching_pivots", ttl)
         openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
         pivot_matcher = PivotMatcher(openai_client=openai_client)
-        suggestions = await pivot_matcher.match_pivots(
-            merged_profile, novelty, gap_entries
-        )
+        suggestions = await pivot_matcher.match_pivots(merged_profile, novelty, gap_entries)
 
         # Log pivot match result for debugging
         if suggestions:
@@ -191,6 +199,17 @@ async def _run_pipeline(
             json.dumps(session_data),
             ex=ttl,
         )
+        # Persist to PostgreSQL for permanent shared links
+        try:
+            async with db_session_factory() as db_session:
+                shared_repo = SharedAnalysisRepository(db_session)
+                await shared_repo.upsert(session_id, session_data["recommendation"])
+        except Exception as persist_err:
+            logger.warning(
+                "Failed to persist shared analysis for session %s: %s",
+                session_id,
+                persist_err,
+            )
         # Privacy: No user data logged
         logger.info("Analysis completed for session %s in %dms", session_id, elapsed_ms)
 
@@ -199,11 +218,13 @@ async def _run_pipeline(
         try:
             await redis.set(
                 f"session:{session_id}",
-                json.dumps({
-                    "status": "error",
-                    "stage": "error",
-                    "error_message": f"Analysis failed: {type(e).__name__}",
-                }),
+                json.dumps(
+                    {
+                        "status": "error",
+                        "stage": "error",
+                        "error_message": f"Analysis failed: {type(e).__name__}",
+                    }
+                ),
                 ex=ttl,
             )
         except Exception:
@@ -213,6 +234,7 @@ async def _run_pipeline(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(
@@ -232,7 +254,7 @@ async def analyze(
         messages_data = json.loads(messages)
         chat_messages = [ChatMessage(**m) for m in messages_data]
     except (json.JSONDecodeError, TypeError, ValueError) as e:
-        raise HTTPException(status_code=422, detail=f"Invalid messages format: {e}")
+        raise HTTPException(status_code=422, detail=f"Invalid messages format: {e}") from e
 
     if not chat_messages:
         raise HTTPException(status_code=422, detail="At least one message is required")
@@ -262,7 +284,7 @@ async def analyze(
         raise HTTPException(
             status_code=503,
             detail=f"Session storage unavailable: {type(e).__name__}",
-        )
+        ) from e
 
     # Launch pipeline in background
     asyncio.create_task(
@@ -283,29 +305,45 @@ async def get_analysis(request: Request, session_id: str):
     """Retrieve analysis status and results by session ID.
 
     Returns current stage while processing, full recommendation when completed.
+    Checks Redis first, then falls back to PostgreSQL for permanent shared links.
     """
     redis = request.app.state.redis
     raw = await redis.get(f"session:{session_id}")
 
-    if raw is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    session_data = json.loads(raw)
-    status = session_data.get("status", "processing")
-    stage = session_data.get("stage")
-
-    result = None
-    if status == "completed" and "recommendation" in session_data:
-        result = ResearchRecommendation.model_validate_json(
-            session_data["recommendation"]
+    if raw is not None:
+        session_data = json.loads(raw)
+        status = session_data.get("status", "processing")
+        stage = session_data.get("stage")
+        result = None
+        if status == "completed" and "recommendation" in session_data:
+            result = ResearchRecommendation.model_validate_json(session_data["recommendation"])
+        return SessionStatusResponse(
+            session_id=session_id,
+            status=status,
+            stage=stage,
+            result=result,
+            error_message=session_data.get("error_message"),
         )
 
+    # Fallback: check PostgreSQL for permanent shared links
+    db_session_factory = request.app.state.db_session_factory
+    try:
+        async with db_session_factory() as db_session:
+            shared_repo = SharedAnalysisRepository(db_session)
+            recommendation_json = await shared_repo.get(session_id)
+    except Exception:
+        recommendation_json = None
+
+    if recommendation_json is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = ResearchRecommendation.model_validate_json(recommendation_json)
     return SessionStatusResponse(
         session_id=session_id,
-        status=status,
-        stage=stage,
+        status="completed",
+        stage="completed",
         result=result,
-        error_message=session_data.get("error_message"),
+        error_message=None,
     )
 
 
@@ -317,9 +355,7 @@ async def chat(request: Request):
     message = body.get("message")
 
     if not session_id or not message:
-        raise HTTPException(
-            status_code=422, detail="session_id and message are required"
-        )
+        raise HTTPException(status_code=422, detail="session_id and message are required")
 
     redis = request.app.state.redis
     raw = await redis.get(f"session:{session_id}")
@@ -327,7 +363,6 @@ async def chat(request: Request):
     if raw is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    session_data = json.loads(raw)
     settings = get_settings()
 
     # Use InfoCollectionService for follow-up
@@ -361,9 +396,18 @@ async def chat(request: Request):
 
 @router.delete("/session/{session_id}", status_code=204)
 async def delete_session(request: Request, session_id: str):
-    """Delete a session and all associated data."""
+    """Delete a session and all associated data (Redis + PostgreSQL)."""
     redis = request.app.state.redis
     await redis.delete(f"session:{session_id}")
+
+    if request.app.state.db_session_factory:
+        try:
+            async with request.app.state.db_session_factory() as db_session:
+                shared_repo = SharedAnalysisRepository(db_session)
+                await shared_repo.delete(session_id)
+        except Exception as e:
+            logger.warning("Failed to delete shared analysis for session %s: %s", session_id, e)
+
     return None
 
 

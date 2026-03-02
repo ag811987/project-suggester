@@ -25,8 +25,16 @@ export function useGetAnalysis(sessionId: string | null) {
     queryKey: ['analysis', sessionId],
     queryFn: () => getAnalysis(sessionId!),
     enabled: !!sessionId,
+    retry: (failureCount, error) => {
+      const status = (error as { response?: { status?: number } })?.response?.status
+      if (status === 404) return false
+      return failureCount < 3
+    },
+    refetchOnWindowFocus: false,
     refetchInterval: (query) => {
-      const status = query.state.data?.status
+      if (query.state.status === 'error') return false
+      if (!query.state.data) return false
+      const status = query.state.data.status
       if (status === 'completed' || status === 'error') return false
       return POLL_INTERVAL_MS
     },

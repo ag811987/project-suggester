@@ -231,17 +231,6 @@ function ExpectedImpactSection({
           {assessment.expected_impact_reasoning}
         </p>
       )}
-
-      {/* Field impact as secondary context */}
-      <div className="mt-4 rounded-md bg-gray-50 p-3">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-gray-500">Field Impact (from literature):</span>
-          <ImpactBadge level={assessment.impact_assessment} />
-        </div>
-        <p className="mt-1 text-xs text-gray-500">
-          {assessment.impact_reasoning}
-        </p>
-      </div>
     </div>
   )
 }

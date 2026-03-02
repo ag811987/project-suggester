@@ -47,8 +47,6 @@ export interface NoveltyAssessment {
   fwci_percentile: number | null
   citation_percentile_min: number | null
   citation_percentile_max: number | null
-  impact_assessment: ImpactLevel
-  impact_reasoning: string
   expected_impact_assessment: ImpactLevel
   expected_impact_reasoning: string
   real_world_impact_assessment?: ImpactLevel

@@ -110,8 +110,6 @@ class TestDecisionEngine:
             evidence=[],
             reasoning="test",
             related_papers_count=0,
-            impact_assessment="MEDIUM",
-            impact_reasoning="test",
             expected_impact_assessment=expected_impact,
             expected_impact_reasoning="test",
         )

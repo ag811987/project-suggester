@@ -124,22 +124,18 @@ async def run_novelty_eval(live: bool = False) -> dict:
                     analyzer, "_get_llm_verdict", new_callable=AsyncMock
                 ) as mock_llm,
                 patch.object(
-                    analyzer, "_assess_impact_llm", new_callable=AsyncMock
-                ) as mock_impact_llm,
-                patch.object(
                     analyzer, "_assess_expected_impact", new_callable=AsyncMock
                 ) as mock_impact,
             ):
                 mock_decompose.return_value = _mock_decomposition()
                 mock_search.return_value = mock_papers
                 mock_llm.return_value = llm_verdict
-                mock_impact_llm.return_value = (impact_level, impact_reasoning)
                 mock_impact.return_value = (impact_level, impact_reasoning)
                 result = await analyzer.analyze(research_question)
 
         verdict_ok = result.verdict == expected_verdict
         impact_ok = (
-            expected_impact is None or result.impact_assessment == expected_impact
+            expected_impact is None or result.expected_impact_assessment == expected_impact
         )
         case_ok = verdict_ok and impact_ok
         if case_ok:
@@ -153,7 +149,7 @@ async def run_novelty_eval(live: bool = False) -> dict:
             "expected_verdict": expected_verdict,
             "actual_verdict": result.verdict,
             "expected_impact": expected_impact,
-            "actual_impact": result.impact_assessment,
+            "actual_impact": result.expected_impact_assessment,
             "passed": case_ok,
         })
 

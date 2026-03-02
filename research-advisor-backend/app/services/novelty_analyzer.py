@@ -235,17 +235,15 @@ class NoveltyAnalyzer:
         openai_api_key: str,
         openalex_api_key: str | None = None,
         openai_model: str = "gpt-4-0125-preview",
-        use_semantic_search: bool = False,
+        use_semantic_search: bool = True,
         semantic_budget_threshold: float = 0.05,
+        semantic_only: bool = True,
+        condense_query_threshold: int = 0,
         multi_query: bool = True,
         queries_per_variant: int = 5,
         use_embedding_rerank: bool = False,
-        fwci_high_threshold: float = 2.2,
-        fwci_low_threshold: float = 1.2,
         search_limit: int = 8,
     ):
-        self._fwci_high = fwci_high_threshold
-        self._fwci_low = fwci_low_threshold
         self._search_limit = search_limit
         self._openalex_client = OpenAlexClient(
             email=openalex_email,
@@ -255,6 +253,8 @@ class NoveltyAnalyzer:
         self._openai_model = openai_model
         self._use_semantic_search = use_semantic_search
         self._semantic_budget_threshold = semantic_budget_threshold
+        self._semantic_only = semantic_only
+        self._condense_query_threshold = condense_query_threshold
         self._multi_query = multi_query
         self._queries_per_variant = queries_per_variant
         self._use_embedding_rerank = use_embedding_rerank
@@ -366,28 +366,26 @@ class NoveltyAnalyzer:
                 researcher_classification, proximity_tiers, tier_stats,
             )
             verdict = llm_result["verdict"]
-            score = llm_result["score"]
+            score = float(llm_result.get("score", 0.5))
             reasoning = llm_result["reasoning"]
+            # Cap score by verdict so MARGINAL/SOLVED never appear as high novelty
+            if verdict == "MARGINAL":
+                score = min(score, 0.55)
+            elif verdict == "SOLVED":
+                score = min(score, 0.35)
+            # Heuristic: species delimitation / method-to-new-population often overscored as NOVEL
+            if verdict == "NOVEL" and score > 0.6:
+                rq_lower = (research_question or "").lower()
+                if "species delimitation" in rq_lower or ("delimitation" in rq_lower and re.search(r"\b[A-Z][a-z]+\b", research_question or "")):
+                    verdict = "MARGINAL"
+                    score = min(score, 0.55)
         except Exception as e:
             logger.error(f"LLM verdict failed: {e}")
             verdict = "UNCERTAIN"
             score = 0.5
             reasoning = f"LLM analysis unavailable: {e}. Assessment based on bibliometric data only."
 
-        # Step 6: LLM-based impact assessment (with field context)
-        try:
-            impact_level, impact_reasoning = await self._assess_impact_llm(
-                research_question, decomposition, profile, papers, stats, verdict,
-                researcher_classification, tier_stats,
-            )
-        except Exception as e:
-            logger.error(f"Impact LLM assessment failed: {e}")
-            impact_level = self._determine_impact_level(stats["average_fwci"])
-            if stats["average_fwci"] is None:
-                impact_level = "UNCERTAIN"
-            impact_reasoning = self._build_impact_reasoning(stats, impact_level)
-
-        # Step 7: Assess expected impact and real-world impact in parallel
+        # Step 6: Assess expected impact and real-world impact in parallel
         (expected_impact, expected_reasoning), (rw_impact, rw_reasoning) = (
             await asyncio.gather(
                 self._assess_expected_impact(
@@ -417,8 +415,6 @@ class NoveltyAnalyzer:
             fwci_percentile=stats["fwci_percentile"],
             citation_percentile_min=stats["citation_percentile_min"],
             citation_percentile_max=stats["citation_percentile_max"],
-            impact_assessment=impact_level,
-            impact_reasoning=impact_reasoning,
             expected_impact_assessment=expected_impact,
             expected_impact_reasoning=expected_reasoning,
             real_world_impact_assessment=rw_impact,
@@ -485,6 +481,25 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
                 potential_impact_domains=[],
                 key_concepts=[],
             )
+
+    async def _condense_query(self, long_text: str) -> str:
+        """Condense a long research description into a short search query that retains meaning."""
+        prompt = """Condense this research description into a short search query (one line, under 20 words) that keeps key concepts, species/taxa names, and the main topic. Remove filler words. Output only the query, no explanation."""
+        try:
+            response = await self._openai_client.chat.completions.create(
+                model=self._openai_model,
+                messages=[
+                    {"role": "system", "content": "You output only the condensed search query, nothing else."},
+                    {"role": "user", "content": f"{prompt}\n\n{long_text[:3000]}"},
+                ],
+                temperature=0.2,
+                max_tokens=150,
+            )
+            out = (response.choices[0].message.content or "").strip()
+            return out[:500] if out else long_text[:500]
+        except Exception as e:
+            logger.warning("Query condense failed (%s), using truncated text", e)
+            return _shorten_query(long_text, max_words=15)
 
     @staticmethod
     def _extract_researcher_taxonomy(papers: list[dict]) -> ResearcherClassification:
@@ -716,11 +731,13 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
                     seen.add(str(pid))
                     merged.append(p)
 
+        # Fallback to broader search only for first 1–2 queries to avoid off-topic results
         if len(merged) < max(5, limit // 2) and queries:
+            fallback_queries = queries[:2]
             broad = await asyncio.gather(
                 *[
                     self._openalex_client.search_papers(q, limit=per_query)
-                    for q in queries
+                    for q in fallback_queries
                 ]
             )
             for result_list in broad:
@@ -735,6 +752,43 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
 
         return merged[:limit]
 
+    def _filter_papers_by_specific_concepts(
+        self,
+        papers: list[dict],
+        decomposition: ResearchDecomposition,
+        research_question: str = "",
+    ) -> list[dict]:
+        """Keep only papers that contain at least one specific key concept in title or abstract.
+
+        Reduces irrelevant hits (e.g. from broad fallback) when we have taxonomic or
+        domain-specific terms. If there are no specific concepts, return all papers.
+        Also derives genus-like terms (capitalized words) from research_question when provided.
+        """
+        specific = [
+            (k or "").strip().lower()
+            for k in (decomposition.key_concepts or [])[:12]
+            if k and _looks_specific(k)
+        ]
+        # Add genus-like terms from the question so we filter by e.g. Psittacara even if not in key_concepts
+        if research_question:
+            for m in re.finditer(r"\b([A-Z][a-z]{4,})\b", research_question):
+                term = m.group(1).lower()
+                if term not in specific and term not in _BROAD_SEARCH_TERMS:
+                    specific.append(term)
+        if not specific:
+            return papers
+        out = []
+        for p in papers:
+            title = (p.get("title") or "").lower()
+            abstract = (p.get("abstract") or "").lower()
+            text = f"{title} {abstract}"
+            if any(term in text for term in specific if len(term) >= 3):
+                out.append(p)
+        # When we expect on-topic papers but none match, do not fall back to irrelevant ones
+        if not out:
+            return []
+        return out
+
     def _filter_and_rerank_by_local_relevance(
         self,
         papers: list[dict],
@@ -745,6 +799,8 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
         """Rerank by similarity to the proposal (no citation-based preference)."""
         if not papers:
             return []
+
+        papers = self._filter_papers_by_specific_concepts(papers, decomposition, research_question)
 
         # Build query terms and phrase boosts from specific key concepts; fall back to question tokens.
         raw_terms: list[str] = []
@@ -781,300 +837,39 @@ Respond with ONLY valid JSON (no markdown, no code fences)."""
     ) -> list[dict]:
         """Search OpenAlex for related papers.
 
-        When budget allows: semantic + multi-query keyword in parallel.
-        When budget low: multi-query keyword only.
-        Fallback when empty: full research_question, then ultra-broad.
+        Semantic-only path (default): use the user's research text as the query, optionally
+        condense long text via LLM, then run OpenAlex semantic search. Fallback to a single
+        keyword search when semantic is unavailable (no API key or budget).
         """
-        # Build keyword_query from key concepts (targeted for keyword search)
-        specific_terms = [
-            k for k in (decomposition.key_concepts or [])
-            if k and len(k) > 2 and _looks_specific(k)
-        ]
-        all_concepts = [k for k in (decomposition.key_concepts or []) if k and len(k) > 2]
-        if specific_terms:
-            primary_query = " ".join(specific_terms[:5])
-        elif all_concepts:
-            primary_query = " ".join(all_concepts[:5])
-        else:
-            primary_query = _shorten_query(research_question)
-
-        # For semantic search use a richer query closer to the user's proposal
-        semantic_query = research_question.strip()
-        if decomposition.core_questions:
-            semantic_query = f"{research_question} {decomposition.core_questions[0]}"
-        semantic_query = semantic_query[:2000]
-
         limit = self._search_limit
-        use_semantic = (
-            self._use_semantic_search
-            and self._openalex_client.api_key
-        )
-
-        if self._multi_query:
-            queries = self._build_search_queries(research_question, decomposition)
-            if not queries:
-                queries = [primary_query or research_question]
-
-            # Privacy: Do NOT log raw queries or research_question.
-            def _fp(s: str) -> str | None:
-                sn = (s or "").strip()
-                return hashlib.sha256(sn.encode("utf-8")).hexdigest()[:12] if sn else None
-
-            t0 = time.perf_counter()
-            try:
-                with open(
-                    "/Users/amit/Coding-Projects/Project-Suggester/.cursor/debug.log",
-                    "a",
-                    encoding="utf-8",
-                ) as f:
-                    f.write(
-                        json.dumps(
-                            {
-                                "id": f"log_{time.time_ns()}",
-                                "timestamp": int(time.time() * 1000),
-                                "location": "app/services/novelty_analyzer.py:_search_papers:begin",
-                                "message": "NoveltyAnalyzer OpenAlex search begin (multi-query)",
-                                "data": {
-                                    "multi_query": True,
-                                    "use_semantic": bool(use_semantic),
-                                    "queries_count": len(queries),
-                                    "queries_sha256_12": [_fp(q) for q in queries],
-                                    "primary_query_sha256_12": _fp(primary_query),
-                                    "primary_query_len": len((primary_query or "").strip()),
-                                    "search_limit": self._search_limit,
-                                    "queries_per_variant": self._queries_per_variant,
-                                },
-                                "runId": "post-fix",
-                                "hypothesisId": "H_OA_EMPTY",
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-
-            if use_semantic:
-                remaining = await self._openalex_client.get_remaining_budget_usd()
-                if remaining is not None and remaining >= self._semantic_budget_threshold:
-                    semantic, keyword = await asyncio.gather(
-                        self._openalex_client.search_papers_semantic(
-                            semantic_query, limit=limit
-                        ),
-                        self._run_multiquery_keyword(queries, limit),
-                    )
-                    papers = _merge_papers(semantic, keyword, limit)
-                else:
-                    papers = await self._run_multiquery_keyword(queries, limit)
-            else:
-                papers = await self._run_multiquery_keyword(queries, limit)
-
-            if papers:
-                papers = self._filter_and_rerank_by_local_relevance(
-                    papers, decomposition, research_question, limit
-                )
-                try:
-                    with open(
-                        "/Users/amit/Coding-Projects/Project-Suggester/.cursor/debug.log",
-                        "a",
-                        encoding="utf-8",
-                    ) as f:
-                        f.write(
-                            json.dumps(
-                                {
-                                    "id": f"log_{time.time_ns()}",
-                                    "timestamp": int(time.time() * 1000),
-                                    "location": "app/services/novelty_analyzer.py:_search_papers:end",
-                                    "message": "NoveltyAnalyzer OpenAlex search end (multi-query)",
-                                    "data": {
-                                        "papers_count": len(papers),
-                                        "elapsed_ms": int((time.perf_counter() - t0) * 1000),
-                                    },
-                                    "runId": "post-fix",
-                                    "hypothesisId": "H_OA_EMPTY",
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                return await self._finalize_papers(research_question, papers, limit)
-            # Fallback when empty
-            papers = await self._openalex_client.search_papers_title_abstract(
-                research_question, limit=limit
-            )
-            if papers:
-                papers = self._filter_and_rerank_by_local_relevance(
-                    papers, decomposition, research_question, limit
-                )
-                return await self._finalize_papers(research_question, papers, limit)
-            kc = [k for k in (decomposition.key_concepts or []) if k and len(k) > 2]
-            ultra = (
-                " OR ".join(kc[:3])
-                if kc
-                else " ".join(research_question.split()[:3])
-            )
-            if ultra:
-                papers = await self._openalex_client.search_papers_title_abstract(
-                    ultra, limit=limit
-                )
-                # Privacy: no raw query logging
-                logger.warning(
-                    "Multi-query returned 0; tried fallbacks (counts only): variants=%d",
-                    len(queries) + 2,
-                )
-                papers = self._filter_and_rerank_by_local_relevance(
-                    papers, decomposition, research_question, limit
-                )
-                return await self._finalize_papers(research_question, papers, limit)
+        semantic_query = (research_question or "").strip()[:2000]
+        if not semantic_query:
             return []
 
-        # Legacy single-query flow (multi_query=False)
+        # Optionally condense long text into a short query that retains meaning
+        if self._condense_query_threshold > 0 and len(semantic_query) > self._condense_query_threshold:
+            semantic_query = await self._condense_query(semantic_query)
+            semantic_query = (semantic_query or research_question)[:2000]
+
+        use_semantic = (
+            (self._semantic_only or self._use_semantic_search)
+            and self._openalex_client.api_key
+        )
         if use_semantic:
             remaining = await self._openalex_client.get_remaining_budget_usd()
-            if remaining is not None and remaining >= self._semantic_budget_threshold:
-                use_tight = specific_terms and len(primary_query) < 80
-                keyword_search = (
-                    self._openalex_client.search_papers_title_abstract
-                    if use_tight
-                    else self._openalex_client.search_papers
+            if remaining is None or remaining >= self._semantic_budget_threshold:
+                papers = await self._openalex_client.search_papers_semantic(
+                    semantic_query, limit=limit
                 )
-                semantic, keyword = await asyncio.gather(
-                    self._openalex_client.search_papers_semantic(
-                        semantic_query, limit=limit
-                    ),
-                    keyword_search(primary_query, limit=limit),
-                )
-                papers = _merge_papers(semantic, keyword, limit)
-                return await self._finalize_papers(
-                    research_question, papers, limit
-                )
-        use_tight = specific_terms and len(primary_query) < 80
-        if use_tight:
-            papers = await self._openalex_client.search_papers_title_abstract(
-                primary_query, limit=limit
-            )
-        else:
-            papers = []
-        if len(papers) < 3:
-            papers = await self._openalex_client.search_papers(
-                primary_query, limit=limit
-            )
-        if len(papers) < 3 and primary_query != research_question:
-            papers = await self._openalex_client.search_papers(
-                _shorten_query(research_question), limit=limit
-            )
-        return await self._finalize_papers(
-            research_question, papers, limit
+                if papers:
+                    return papers[:limit]
+        # Fallback: single keyword search when semantic unavailable or returned nothing
+        papers = await self._openalex_client.search_papers_title_abstract(
+            semantic_query, limit=limit
         )
-
-    async def _assess_impact_llm(
-        self,
-        research_question: str,
-        decomposition: ResearchDecomposition,
-        profile: ResearchProfile | None,
-        papers: list[dict],
-        stats: dict,
-        verdict: str,
-        classification: ResearcherClassification | None = None,
-        tier_stats: dict[str, dict] | None = None,
-    ) -> tuple[str, str]:
-        """LLM-based impact assessment using FWCI as evidence, not sole rule."""
-        fwci_level = self._determine_impact_level(stats["average_fwci"])
-        if stats["average_fwci"] is None:
-            fwci_level = "UNCERTAIN"
-
-        paper_summaries = []
-        for p in papers[:8]:
-            abstract = (p.get("abstract") or "")[:300]
-            concepts = p.get("concepts", [])[:3]
-            concepts_str = ", ".join(c[0] for c in concepts) if concepts else "N/A"
-            paper_summaries.append(
-                f"- {p['title']} (FWCI: {p.get('fwci', 'N/A')}, Year: {p.get('publication_year', 'N/A')})\n"
-                f"  Abstract: {abstract}...\n  Concepts: {concepts_str}"
-            )
-
-        impact_domains = ", ".join(decomposition.potential_impact_domains) or "Not specified"
-        profile_text = ""
-        if profile:
-            profile_text = f"Skills: {', '.join(profile.skills)}, Expertise: {', '.join(profile.expertise_areas)}"
-
-        # Build field context block from taxonomy classification
-        field_context = ""
-        if classification and tier_stats:
-            same_topic_stats = tier_stats.get("same_topic", {})
-            same_subfield_stats = tier_stats.get("same_subfield", {})
-            field_context = f"""
-FIELD CONTEXT:
-- Researcher's field: {classification.primary_field or 'Unknown'} > {classification.primary_subfield or 'Unknown'}
-- FWCI within their exact topic: {same_topic_stats.get('average_fwci', 'N/A')} (from {same_topic_stats.get('papers_with_fwci', 0)} papers)
-- FWCI in adjacent subfields: {same_subfield_stats.get('average_fwci', 'N/A')} (from {same_subfield_stats.get('papers_with_fwci', 0)} papers)
-- Topic diversity: {classification.topic_diversity or 'N/A'}
-
-Papers from the researcher's exact topic are the most relevant for assessing field activity and competition."""
-
-        prompt = f"""Assess the impact potential of this research area.
-
-Research Question: {research_question}
-Core Questions: {', '.join(decomposition.core_questions) or 'N/A'}
-Potential Impact Domains: {impact_domains}
-Researcher: {profile_text or 'Not specified'}
-
-Novelty Verdict: {verdict}
-
-Related Papers ({len(papers)} found):
-{chr(10).join(paper_summaries)}
-
-FWCI Statistics:
-- Average FWCI: {stats.get('average_fwci', 'N/A')}
-- Papers with FWCI data: {stats.get('papers_with_fwci', 0)}
-- FWCI-based level: {fwci_level}
-{field_context}
-
-Consider:
-1. Field interest: Is this area receiving attention (from FWCI/citations)?
-2. Significance: Would answering the core question matter to the impact domains?
-3. Researcher fit: Does their profile suggest they can execute and have impact?
-4. Opportunity cost: Is this a good use of the researcher's skills? Would they have more impact elsewhere? Avoid over-scoring niche research (e.g., speciating a particular species)—ask who actually benefits and whether the problem justifies the researcher's expertise.
-
-Use FWCI as evidence, not the sole rule. You may override when justified (e.g., new field with few citations but high potential). Be appropriately skeptical of impact inflation.
-
-Respond with ONLY valid JSON:
-{{"impact_assessment": "HIGH|MEDIUM|LOW|UNCERTAIN", "impact_reasoning": "explanation"}}"""
-
-        try:
-            response = await self._openai_client.chat.completions.create(
-                model=self._openai_model,
-                messages=[
-                    {"role": "system", "content": EXPERT_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=400,
-            )
-            content = response.choices[0].message.content.strip()
-            result = json.loads(content)
-            impact = result.get("impact_assessment", fwci_level)
-            reasoning = result.get("impact_reasoning", "")
-            if impact not in ("HIGH", "MEDIUM", "LOW", "UNCERTAIN"):
-                impact = fwci_level
-            return impact, reasoning or self._build_impact_reasoning(stats, impact)
-        except Exception as e:
-            logger.warning(f"Impact LLM failed: {e}")
-            return fwci_level, self._build_impact_reasoning(stats, fwci_level)
-
-    def _determine_impact_level(self, avg_fwci: float | None) -> str:
-        """Determine impact level from average FWCI.
-
-        Uses configurable thresholds (defaults stricter than raw OpenAlex due to
-        known inflation; see docs/FWCI_CALIBRATION.md).
-        """
-        if avg_fwci is None:
-            return "UNCERTAIN"
-        if avg_fwci > self._fwci_high:
-            return "HIGH"
-        if avg_fwci < self._fwci_low:
-            return "LOW"
-        return "MEDIUM"
+        if not papers:
+            papers = await self._openalex_client.search_papers(semantic_query, limit=limit)
+        return (papers or [])[:limit]
 
     _citation_cap = 10
 
@@ -1120,23 +915,6 @@ Respond with ONLY valid JSON:
 
         return [_to_citation(p) for p in filtered]
 
-    def _build_impact_reasoning(self, stats: dict, impact_level: str) -> str:
-        """Build a human-readable impact reasoning string."""
-        avg = stats.get("average_fwci")
-        count = stats.get("papers_with_fwci", 0)
-
-        if avg is None:
-            return "No FWCI data available for related papers. Impact cannot be determined."
-
-        return (
-            f"Based on {count} papers with FWCI data: "
-            f"average FWCI = {avg:.2f}. "
-            f"Impact level: {impact_level} "
-            f"(HIGH > {self._fwci_high}, "
-            f"MEDIUM {self._fwci_low}-{self._fwci_high}, "
-            f"LOW < {self._fwci_low})."
-        )
-
     def _uncertain_assessment(
         self,
         reasoning: str,
@@ -1153,8 +931,6 @@ Respond with ONLY valid JSON:
             fwci_percentile=None,
             citation_percentile_min=None,
             citation_percentile_max=None,
-            impact_assessment="UNCERTAIN",
-            impact_reasoning="Unable to determine impact due to insufficient data.",
             expected_impact_assessment="UNCERTAIN",
             expected_impact_reasoning="Unable to predict expected impact due to insufficient data.",
             real_world_impact_assessment="UNCERTAIN",
@@ -1220,7 +996,18 @@ FIELD POSITIONING:
 
 Higher diversity can mean untapped cross-field transfer opportunities."""
 
-        prompt = f"""Predict the expected impact of a researcher's work if it goes through.
+        # Classify existing field activity from FWCI for context
+        avg_fwci = stats.get("average_fwci")
+        if avg_fwci is None:
+            fwci_signal = "No FWCI data available — field activity unknown"
+        elif avg_fwci > 2.2:
+            fwci_signal = f"HIGH field activity (avg FWCI {avg_fwci:.2f} — well above world average of 1.0)"
+        elif avg_fwci < 1.2:
+            fwci_signal = f"LOW field activity (avg FWCI {avg_fwci:.2f} — below world average of 1.0)"
+        else:
+            fwci_signal = f"MODERATE field activity (avg FWCI {avg_fwci:.2f} — near world average of 1.0)"
+
+        prompt = f"""Predict the impact of a researcher's work on their discipline if completed.
 
 Research Question: {research_question}
 Core Questions: {core_questions}
@@ -1232,19 +1019,23 @@ Novelty Verdict: {verdict} (score: {novelty_score:.2f})
 Related Literature ({len(papers)} papers found):
 {chr(10).join(paper_summaries)}
 
-FWCI Statistics:
+FIELD & LITERATURE CONTEXT:
 - Average FWCI of related papers: {stats.get('average_fwci', 'N/A')}
 - Papers with FWCI data: {stats.get('papers_with_fwci', 0)}
+- Field activity signal: {fwci_signal}
+- Citation percentile range: {stats.get('citation_percentile_min', 'N/A')}–{stats.get('citation_percentile_max', 'N/A')}
 {field_positioning}
 
 Based on:
 1. The novelty of the research angle (method-to-new-population is usually incremental, not transformative)
-2. The researcher's skills and expertise
-3. The current state of the field (related papers and their impact)
-4. The potential for this specific research to advance knowledge
+2. The researcher's skills and expertise fit
+3. The current state of the field — is it active and well-cited, or niche and underexplored?
+4. The potential for this specific research to advance knowledge, create new tools, or change methods
 5. Opportunity cost: Would the researcher's skills be better used elsewhere? Is this problem significant enough to justify their expertise?
 
-Predict the expected impact if this research is completed:
+Use FWCI as evidence of field activity, not the sole determinant. You may override when justified (e.g., new field with few citations but high potential, or saturated field where even novel work is incremental).
+
+Predict the impact on the discipline if this research is completed:
 - HIGH: Will likely produce highly-cited, field-advancing work that justifies the researcher's skills
 - MEDIUM: Will contribute meaningfully but incrementally to the field
 - LOW: Unlikely to have significant impact (e.g. saturated area, weak angle, niche problem that doesn't justify the researcher's expertise)
@@ -1507,7 +1298,7 @@ For each paper, consider:
 1. Does it answer the SAME core question(s), or a related but different question?
 2. Similarity: High = same core question; Medium = related subquestion; Low = tangential
 3. What remains unanswered?
-4. Method-to-new-population: If the research is essentially applying well-established methods to a different species, population, or dataset (e.g., same technique on parakeets instead of finches), that is typically MARGINAL—not NOVEL. True novelty requires new conceptual questions, new methodology, or genuinely unexplored territory.
+4. Method-to-new-population: If the research is essentially applying well-established methods to a different species, population, or dataset (e.g., same technique on parakeets instead of finches), that is typically MARGINAL—not NOVEL. True novelty requires new conceptual questions, new methodology, or genuinely unexplored territory. If the work is primarily applying established methods to a new taxon or population with no new conceptual or methodological contribution, the verdict MUST be MARGINAL and the score MUST be in the range 0.2–0.5. When in doubt between NOVEL and MARGINAL for method-to-new-population, choose MARGINAL.
 {proximity_guidance}
 
 Determine the novelty verdict:

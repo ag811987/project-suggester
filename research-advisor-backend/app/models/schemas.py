@@ -190,17 +190,7 @@ class NoveltyAssessment(BaseModel):
         le=100,
         description="Maximum citation percentile from cited_by_percentile_year"
     )
-    # Literature/field impact (from FWCI of related papers)
-    impact_assessment: ImpactLevel = Field(
-        ...,
-        description="Impact of existing literature in the field (from FWCI of related papers)"
-    )
-    impact_reasoning: str = Field(
-        ...,
-        description="Explanation of the field/literature impact based on FWCI and citations"
-    )
-
-    # Expected impact of THIS research if it goes through
+    # Forward-looking impact: will this research change the discipline?
     expected_impact_assessment: ImpactLevel = Field(
         ...,
         description="Predicted impact of the researcher's work if completed"

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.gap_retriever import GapRetriever, _taxonomy_boost
+from app.services.gap_retriever import GapRetriever, _source_boost, _taxonomy_boost
 from app.models.schemas import (
     GapMapEntry,
     NoveltyAssessment,
@@ -38,8 +38,6 @@ def _make_novelty(**kwargs) -> NoveltyAssessment:
         "evidence": [],
         "reasoning": "test",
         "related_papers_count": 0,
-        "impact_assessment": "UNCERTAIN",
-        "impact_reasoning": "test",
         "expected_impact_assessment": "UNCERTAIN",
         "expected_impact_reasoning": "test",
         "researcher_classification": None,

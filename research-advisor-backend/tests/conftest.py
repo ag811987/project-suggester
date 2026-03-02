@@ -194,8 +194,6 @@ def sample_novelty_assessment():
         fwci_percentile=0.67,
         citation_percentile_min=35,
         citation_percentile_max=95,
-        impact_assessment="MEDIUM",
-        impact_reasoning="Related papers show moderate impact (avg FWCI 1.7), indicating active but not breakthrough-level research area.",
         expected_impact_assessment="MEDIUM",
         expected_impact_reasoning="The research has moderate expected impact given the novelty of the approach and the researcher's skills.",
     )

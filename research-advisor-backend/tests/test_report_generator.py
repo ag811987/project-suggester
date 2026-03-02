@@ -68,8 +68,6 @@ def novelty_solved():
         fwci_percentile=0.95,
         citation_percentile_min=85,
         citation_percentile_max=99,
-        impact_assessment="HIGH",
-        impact_reasoning="Well-established area with high citations.",
         expected_impact_assessment="LOW",
         expected_impact_reasoning="Problem already solved; new work unlikely to have significant impact.",
     )
@@ -88,8 +86,6 @@ def novelty_marginal():
         fwci_percentile=0.55,
         citation_percentile_min=40,
         citation_percentile_max=65,
-        impact_assessment="MEDIUM",
-        impact_reasoning="Moderate impact area.",
         expected_impact_assessment="LOW",
         expected_impact_reasoning="Marginal novelty limits expected impact.",
     )
@@ -108,8 +104,6 @@ def novelty_novel_high():
         fwci_percentile=0.80,
         citation_percentile_min=70,
         citation_percentile_max=90,
-        impact_assessment="HIGH",
-        impact_reasoning="High impact area with strong citations.",
         expected_impact_assessment="HIGH",
         expected_impact_reasoning="Highly novel direction with strong expected impact.",
     )
@@ -128,8 +122,6 @@ def novelty_novel_medium():
         fwci_percentile=0.60,
         citation_percentile_min=50,
         citation_percentile_max=70,
-        impact_assessment="MEDIUM",
-        impact_reasoning="Moderate impact area.",
         expected_impact_assessment="MEDIUM",
         expected_impact_reasoning="Moderate expected impact given novelty and field context.",
     )
@@ -148,8 +140,6 @@ def novelty_novel_low():
         fwci_percentile=0.20,
         citation_percentile_min=10,
         citation_percentile_max=30,
-        impact_assessment="LOW",
-        impact_reasoning="Low citation impact area.",
         expected_impact_assessment="LOW",
         expected_impact_reasoning="Low expected impact due to niche field with limited audience.",
     )
@@ -168,8 +158,6 @@ def novelty_uncertain():
         fwci_percentile=None,
         citation_percentile_min=None,
         citation_percentile_max=None,
-        impact_assessment="UNCERTAIN",
-        impact_reasoning="Cannot determine impact.",
         expected_impact_assessment="UNCERTAIN",
         expected_impact_reasoning="Cannot predict expected impact due to insufficient data.",
     )

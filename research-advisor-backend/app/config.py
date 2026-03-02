@@ -102,8 +102,18 @@ class Settings(BaseSettings):
         description="OpenAlex API key for semantic search (optional, costs $0.001/query)"
     )
     openalex_use_semantic_search: bool = Field(
-        default=False,
-        description="Use semantic search instead of keyword search (requires API key)"
+        default=True,
+        description="Use OpenAlex semantic search for paper retrieval (recommended; requires API key)"
+    )
+    openalex_semantic_only: bool = Field(
+        default=True,
+        description="Use only semantic search (no multi-query keyword merge). Simpler and often better relevance."
+    )
+    openalex_condense_query_threshold: int = Field(
+        default=0,
+        ge=0,
+        le=10000,
+        description="When research text length exceeds this, condense to a short query via LLM before semantic search (0 = disabled)"
     )
     openalex_semantic_budget_threshold: float = Field(
         default=0.05,
@@ -131,20 +141,6 @@ class Settings(BaseSettings):
         description="Whether to use Oxylabs for scraping (false = direct HTTP)"
     )
 
-    # FWCI Calibration (OpenAlex FWCI tends to inflate vs SciVal; research suggests ~1.5x)
-    # Stricter thresholds reduce false HIGH scores. See docs/FWCI_CALIBRATION.md
-    fwci_high_threshold: float = Field(
-        default=2.2,
-        ge=0.5,
-        le=5.0,
-        description="FWCI above this = HIGH impact (default 2.2, stricter than OpenAlex raw 1.5)"
-    )
-    fwci_low_threshold: float = Field(
-        default=1.2,
-        ge=0.0,
-        le=3.0,
-        description="FWCI below this = LOW impact (default 1.2). Between low and high = MEDIUM"
-    )
     openalex_search_limit: int = Field(
         default=8,
         ge=3,

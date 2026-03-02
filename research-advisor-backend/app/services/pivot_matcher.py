@@ -31,6 +31,10 @@ IMPACT_WEIGHTS: dict[str, float] = {
     "UNCERTAIN": 1.5,
 }
 
+# True research gaps (Convergent, Homeworld, 3ie) prioritized over open questions (Wikenigma)
+_SOURCE_PRIORITY_BOOST = 0.15
+_PRIORITY_SOURCES = frozenset({"convergent", "homeworld", "3ie"})
+
 
 class PivotMatcher:
     """Matches researchers to potential research pivots using LLM analysis."""
@@ -39,7 +43,11 @@ class PivotMatcher:
         self._client = openai_client
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call the LLM with structured JSON output and a single retry on parse failure."""
+        """Call the LLM with JSON array output and a single retry on parse failure.
+
+        Does not use response_format=json_object so the model can return a top-level
+        JSON array as required by the prompt.
+        """
         if self._client is None:
             self._client = AsyncOpenAI(api_key=get_settings().openai_api_key)
 
@@ -50,10 +58,17 @@ class PivotMatcher:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.4,
                 max_tokens=2000,
-                response_format={"type": "json_object"},
                 timeout=60,
             )
-            content = response.choices[0].message.content or ""
+            content = (response.choices[0].message.content or "").strip()
+            # Strip markdown code block if present
+            if content.startswith("```"):
+                lines = content.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                content = "\n".join(lines)
             try:
                 json.loads(content)
                 return content
@@ -168,11 +183,13 @@ RESEARCHER PROFILE:
 
 CURRENT RESEARCH NOVELTY:
 - Verdict: {novelty.verdict}
-- Impact: {novelty.impact_assessment}
+- Impact: {novelty.expected_impact_assessment}
 - Reasoning: {novelty.reasoning}
 
 AVAILABLE RESEARCH GAPS:
 {gaps_text}
+
+PRIORITY SOURCES: Gaps from Convergent Research, Homeworld Bio, and 3ie are curated research gaps (true R&D needs). Wikenigma entries are open questions. When relevance is similar, prefer gaps from Convergent, Homeworld, or 3ie.
 
 For each gap that could be a good match, return a JSON array of objects with:
 - "gap_index": integer index from the list above
@@ -197,19 +214,50 @@ Return ONLY valid JSON array. No other text."""
             logger.warning("LLM returned invalid JSON for pivot matching")
             return []
 
-        if not isinstance(raw, list):
-            logger.warning("LLM response is not a JSON array")
+        # Unwrap: accept top-level array or object with a list under common keys
+        items: list[dict] = []
+        if isinstance(raw, list):
+            items = raw
+        elif isinstance(raw, dict):
+            for key in ("suggestions", "items", "matches", "results", "pivots"):
+                val = raw.get(key)
+                if isinstance(val, list):
+                    items = val
+                    break
+            if not items:
+                logger.warning(
+                    "LLM response is not a JSON array; got dict with keys: %s",
+                    list(raw.keys()),
+                )
+                return []
+        else:
+            logger.warning(
+                "LLM response is not a JSON array; got type: %s",
+                type(raw).__name__,
+            )
             return []
 
+        top_n = max(1, top_n)
         suggestions: list[tuple[float, PivotSuggestion]] = []
 
-        for item in raw:
+        for item in items:
             try:
+                if not isinstance(item, dict):
+                    continue
                 gap_index = item.get("gap_index")
-                if gap_index is None or gap_index < 0 or gap_index >= len(gap_entries):
+                if gap_index is None:
+                    continue
+                try:
+                    gap_index = int(gap_index)
+                except (ValueError, TypeError):
+                    continue
+                if gap_index < 0 or gap_index >= len(gap_entries):
                     continue
 
-                relevance = float(item.get("relevance_score", 0.0))
+                try:
+                    relevance = float(item.get("relevance_score", 0.0))
+                except (ValueError, TypeError):
+                    relevance = 0.0
                 relevance = max(0.0, min(1.0, relevance))  # Clamp to [0, 1]
 
                 impact = item.get("impact_potential", "MEDIUM")
@@ -226,6 +274,8 @@ Return ONLY valid JSON array. No other text."""
                 )
 
                 composite_score = relevance * IMPACT_WEIGHTS[impact]
+                if gap_entries[gap_index].source in _PRIORITY_SOURCES:
+                    composite_score += _SOURCE_PRIORITY_BOOST
                 suggestions.append((composite_score, suggestion))
             except (ValueError, KeyError, TypeError):
                 logger.warning("Skipping malformed pivot match item: %s", item)

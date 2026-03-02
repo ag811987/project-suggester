@@ -2,7 +2,45 @@
 
 ## Current Status: PHASE 5 COMPLETE ✅ — ALL PHASES DONE
 
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-03-02
+
+---
+
+## Recent Updates (Permanent Shared Links)
+
+**2026-03-02: Shared links work permanently for viral sharing**
+- **Problem:** Shared URLs (`?session=xyz`) returned 404 after Redis TTL (1 hour). Links shared on Twitter, etc. would break.
+- **Solution:** Persist completed analyses to PostgreSQL `shared_analyses` table. `GET /analysis/{session_id}` checks Redis first, then falls back to PostgreSQL for permanent links.
+- **Implementation:** New `SharedAnalysis` model, `SharedAnalysisRepository`, Alembic migration. Pipeline persists on completion; `DELETE /session/{id}` removes from both Redis and PostgreSQL.
+- **Privacy:** Shared results are stored to keep links working. Users can delete via DELETE endpoint to remove. Only `ResearchRecommendation` (report, verdict, pivots, citations) is stored — no raw chat, files, or profile.
+
+---
+
+## Recent Updates (Pivot Matching JSON Fix)
+
+**2026-03-02: Fix "LLM response is not a JSON array" causing 0 pivot suggestions**
+- **Root cause:** `PivotMatcher._call_llm` used `response_format={"type": "json_object"}` which forces a top-level object, while `_parse_response` expected a top-level JSON array. The model returned `{"suggestions": [...]}` or similar; parser rejected it and returned `[]`.
+- **Fix:** Removed `response_format=json_object` so the model can return a top-level array. Added unwrap logic in `_parse_response`: if the response is a dict with a list under `suggestions`, `items`, `matches`, `results`, or `pivots`, use that list. Added markdown code-block stripping and safer coercion for `gap_index`/`relevance_score`.
+- **Schema alignment:** Replaced deprecated `impact_assessment`/`impact_reasoning` references with `expected_impact_assessment`/`expected_impact_reasoning` in pivot_matcher, report_generator, and routes.
+- **Tests:** New `TestParseResponse` class (6 tests) for array, wrapped-object, invalid JSON, and non-array cases. Psittacara regression now passes with 3 pivot suggestions (was 0).
+
+---
+
+## Recent Updates (Semantic-Only Paper Search)
+
+**2026-02-25: Simplify paper retrieval to OpenAlex semantic search**
+- **Semantic-only path (default):** Paper search now uses the user's research text as the query (or a condensed version when long), then runs OpenAlex semantic search only. No multi-query keyword merge, no BM25 rerank, no specific-concept filter. Matches user testing: full or shortened query yields highly relevant results.
+- **Optional condense:** When `OPENALEX_CONDENSE_QUERY_THRESHOLD` > 0 and research text length exceeds it, an LLM condenses the text to a short query that retains meaning before semantic search (for documents or long paragraphs).
+- **Config:** `OPENALEX_SEMANTIC_ONLY` (default True), `OPENALEX_USE_SEMANTIC_SEARCH` (default True), `OPENALEX_CONDENSE_QUERY_THRESHOLD` (default 0). Fallback to single keyword search when semantic unavailable (no API key or budget).
+
+---
+
+## Recent Updates (Novelty Score, Reference Relevance, Gap Retrieval Resilience)
+
+**2026-02-24: General fixes for novelty overscoring, irrelevant references, and gap retrieval failure**
+- **Novelty:** Stronger method-to-new-population rule in LLM prompt (verdict MARGINAL, score 0.2–0.5 when applying established methods to new taxon/population). Post-process score: cap at 0.55 for MARGINAL, 0.35 for SOLVED.
+- **References:** Filter papers to those containing at least one specific key concept (e.g. genus name, technique) in title/abstract before BM25 rerank; if no specific concepts, no filter. Broad fallback in multi-query now runs only for first 2 queries (niche + one backup) instead of all queries to reduce off-topic hits.
+- **Gap retrieval:** On vector-search or DB failure, log full exception and fallback to get_all() so pipeline returns up to top_k gap entries. Validate query embedding (list of 1536 numbers) before pgvector call; catch vector-search exceptions in retriever and fall back to get_all(). Ensures pivots are still returned when pgvector is missing or embeddings not backfilled.
 
 ---
 

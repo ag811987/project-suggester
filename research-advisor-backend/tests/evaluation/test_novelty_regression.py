@@ -122,21 +122,16 @@ async def test_novelty_benchmark_regression(analyzer, default_papers):
                 analyzer, "_get_llm_verdict", new_callable=AsyncMock
             ) as mock_llm,
             patch.object(
-                analyzer, "_assess_impact_llm", new_callable=AsyncMock
-            ) as mock_impact_llm,
-            patch.object(
                 analyzer, "_assess_expected_impact", new_callable=AsyncMock
             ) as mock_impact,
         ):
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = mock_papers
             mock_llm.return_value = llm_verdict
-            mock_impact_llm.return_value = (impact_level, impact_reasoning)
             mock_impact.return_value = (impact_level, impact_reasoning)
 
             result = await analyzer.analyze(research_question)
 
-            # Strict verdict check (or fuzzy for MARGINAL/UNCERTAIN)
             allowed = FUZZY_VERDICT_MAP.get(
                 expected_verdict, {expected_verdict}
             )
@@ -146,10 +141,10 @@ async def test_novelty_benchmark_regression(analyzer, default_papers):
                 )
                 continue
 
-            if expected_impact and result.impact_assessment != expected_impact:
+            if expected_impact and result.expected_impact_assessment != expected_impact:
                 failed.append(
                     f"{case_id}: expected impact {expected_impact}, "
-                    f"got {result.impact_assessment}"
+                    f"got {result.expected_impact_assessment}"
                 )
 
     assert not failed, "Benchmark failures:\n" + "\n".join(failed)
@@ -188,16 +183,12 @@ async def test_novelty_benchmark_case_by_case(analyzer, default_papers):
                 analyzer, "_get_llm_verdict", new_callable=AsyncMock
             ) as mock_llm,
             patch.object(
-                analyzer, "_assess_impact_llm", new_callable=AsyncMock
-            ) as mock_impact_llm,
-            patch.object(
                 analyzer, "_assess_expected_impact", new_callable=AsyncMock
             ) as mock_impact,
         ):
             mock_decompose.return_value = _mock_decomposition()
             mock_search.return_value = mock_papers
             mock_llm.return_value = llm_verdict
-            mock_impact_llm.return_value = (impact_level, impact_reasoning)
             mock_impact.return_value = (impact_level, impact_reasoning)
 
             result = await analyzer.analyze(research_question)
@@ -209,7 +200,7 @@ async def test_novelty_benchmark_case_by_case(analyzer, default_papers):
                 f"{case_id}: expected verdict in {allowed}, got {result.verdict}"
             )
             if expected_impact:
-                assert result.impact_assessment == expected_impact, (
+                assert result.expected_impact_assessment == expected_impact, (
                     f"{case_id}: expected impact {expected_impact}, "
-                    f"got {result.impact_assessment}"
+                    f"got {result.expected_impact_assessment}"
                 )

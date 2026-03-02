@@ -270,11 +270,10 @@ NOVELTY ANALYSIS:
 - Verdict: {novelty.verdict}
 - {fwci_text}
 - Related Papers: {novelty.related_papers_count}
-- Literature Impact (FWCI-based): {novelty.impact_assessment} — {novelty.impact_reasoning}
 - Novelty Reasoning: {novelty.reasoning}
 
 IMPACT ON THE FIELD (discipline, methods, tools):
-- Impact on the field: {novelty.expected_impact_assessment}
+- Expected Impact: {novelty.expected_impact_assessment}
 - Reasoning: {novelty.expected_impact_reasoning}
 
 GLOBAL IMPACT (society, policy, population):
@@ -377,8 +376,7 @@ Each section should be self-contained and readable on its own."""
 
 **Literature Context:**
 - Related Papers Found: {novelty.related_papers_count}
-- {fwci_info}
-- Literature Impact: {novelty.impact_assessment} — {novelty.impact_reasoning}"""
+- {fwci_info}"""
 
         impact_section = f"""**Impact on the field: {novelty.expected_impact_assessment}**
 
