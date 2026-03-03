@@ -1104,17 +1104,12 @@ Apply these HARSH criteria. Be a skeptic, not a cheerleader:
    - Yes, broadly applicable = boosts toward HIGH
    - No, only advances internal subfield knowledge = does not boost
 
-3. NEWS TEST: Would a non-specialist journalist write about this result?
-   - Front page of a major newspaper = HIGH
-   - Science section of a newspaper = MEDIUM
-   - Only in a specialist journal = LOW
-
-4. COMPARE to these benchmarks:
+3. COMPARE to these benchmarks:
    - HIGH: Curing a disease, discovering a new material, preventing famine, new energy source
    - MEDIUM: Improving crop yields 10%, better diagnostic for a common condition, new conservation strategy for an endangered ecosystem
    - LOW: Speciating a particular bird species, incremental taxonomy revision, method applied to new population with no broader consequence
 
-5. HONESTY CHECK: If the researcher never did this work, would anyone outside their lab notice within 5 years?
+4. HONESTY CHECK: If the researcher never did this work, would anyone outside their lab notice within 5 years?
 
 Respond with ONLY valid JSON:
 {{"real_world_impact": "HIGH|MEDIUM|LOW", "reasoning": "Be specific: who benefits, how many, and to what degree. Name concrete consequences or their absence."}}"""

@@ -181,6 +181,14 @@ RESEARCHER PROFILE:
 - Interests: {', '.join(profile.interests) if profile.interests else 'Not specified'}
 {field_position}
 
+CRITICAL - AVOID FORCED FIT:
+Do NOT mechanically append the researcher's species, taxon, or study system to every gap.
+Only suggest a gap if the specific project genuinely makes sense for their skills AND the topic.
+If forcing their study system into a gap would be nonsensical (e.g., studying magnetoreception
+in a species that doesn't exhibit it), SKIP that gap or propose a project that genuinely uses
+their skills (e.g., comparative genomics of magnetoreception loss across bird lineages).
+Match their SKILLS to the gap—not their taxon label.
+
 CURRENT RESEARCH NOVELTY:
 - Verdict: {novelty.verdict}
 - Impact: {novelty.expected_impact_assessment}
@@ -191,13 +199,17 @@ AVAILABLE RESEARCH GAPS:
 
 PRIORITY SOURCES: Gaps from Convergent Research, Homeworld Bio, and 3ie are curated research gaps (true R&D needs). Wikenigma entries are open questions. When relevance is similar, prefer gaps from Convergent, Homeworld, or 3ie.
 
-For each gap that could be a good match, return a JSON array of objects with:
+For each gap that could be a good match, propose a SPECIFIC, CONCRETE PROJECT this researcher can work on within that topic. The output "specific_title" becomes the main heading—it should be the actionable project (e.g. "Developing low-cost soil moisture sensors for degraded grasslands"), NOT the broad gap title (e.g. "Challenges in Tracking and Restoring Resilient Ecosystems").
+
+Return a JSON array of objects with:
 - "gap_index": integer index from the list above
-- "relevance_score": float 0.0-1.0 (how well researcher's skills match this gap)
+- "specific_title": concise title of the specific project (the actionable work the researcher can do within this gap)
+- "specific_description": 2-3 sentences explaining the broader research gap this project addresses, and how this specific project contributes to it. Do not quote the gap map verbatim—explain in context.
+- "relevance_score": float 0.0-1.0 (how well researcher's skills match this specific project)
 - "impact_potential": "HIGH", "MEDIUM", or "LOW" — be skeptical: avoid over-scoring niche problems. HIGH = meaningful beneficiaries, justifies expertise.
-- "match_reasoning": why this gap matches the researcher's skills and motivations. Note the pivot distance (near/adjacent/bold) based on the OpenAlex taxonomy.
-- "feasibility_for_researcher": CONCRETE guidance on how the researcher can leverage their specific skills ({', '.join(profile.skills) if profile.skills else 'their expertise'}) in this pivot. Be actionable: e.g. "Your X skills would allow you to..." or "Apply your background in Y to..."
-- "impact_rationale": why this problem is a BETTER use of the researcher's skills than their current direction. Who benefits? Why is this worth their time? Avoid generic praise—be specific.
+- "match_reasoning": why this SPECIFIC PROJECT matches the researcher's skills and motivations. Note the pivot distance (near/adjacent/bold) based on the OpenAlex taxonomy.
+- "feasibility_for_researcher": how they can execute this SPECIFIC PROJECT. Be actionable: e.g. "Your X skills would allow you to..." or "Apply your background in Y to..."
+- "impact_rationale": impact of this SPECIFIC PROJECT and how it contributes to the broader gap topic. Who benefits? Why is this worth their time?
 
 Return ONLY valid JSON array. No other text."""
 
@@ -264,8 +276,22 @@ Return ONLY valid JSON array. No other text."""
                 if impact not in IMPACT_WEIGHTS:
                     impact = "MEDIUM"
 
+                specific_title = item.get("specific_title")
+                if isinstance(specific_title, str):
+                    specific_title = specific_title.strip() or None
+                else:
+                    specific_title = None
+
+                specific_description = item.get("specific_description")
+                if isinstance(specific_description, str):
+                    specific_description = specific_description.strip() or None
+                else:
+                    specific_description = None
+
                 suggestion = PivotSuggestion(
                     gap_entry=gap_entries[gap_index],
+                    specific_title=specific_title,
+                    specific_description=specific_description,
                     relevance_score=relevance,
                     impact_potential=impact,
                     match_reasoning=item.get("match_reasoning", ""),

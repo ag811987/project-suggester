@@ -262,6 +262,14 @@ class PivotSuggestion(BaseModel):
     researcher's skills and has higher impact potential.
     """
     gap_entry: GapMapEntry = Field(..., description="The gap map entry being suggested")
+    specific_title: str | None = Field(
+        default=None,
+        description="The specific, actionable project or sub-problem—used as the display title. The gap_entry provides the broader topic and source link.",
+    )
+    specific_description: str | None = Field(
+        default=None,
+        description="2-3 sentences: the broader research gap this project addresses and how the specific project fits into it. Replaces raw gap map quote.",
+    )
     relevance_score: float = Field(
         ...,
         ge=0.0,

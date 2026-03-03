@@ -179,17 +179,23 @@ class ReportGenerator:
     ) -> str:
         """Build pivot section from structured suggestions or short fallback.
 
-        When suggestions exist: template-driven blocks (title, link, match_reasoning,
-        impact_rationale). When none: short static fallback with repo links.
+        When suggestions exist: gap as premise, specific_title as heading,
+        match/feasibility/impact tied to the specific project.
         """
         if pivot_suggestions:
             intro = "We matched you to the following gap map projects."
             blocks = []
             for p in pivot_suggestions[:5 if recommendation == "PIVOT" else 2]:
-                title = p.gap_entry.title
+                gap_title = p.gap_entry.title
                 url = p.gap_entry.source_url or ""
-                link = f"[{title}]({url})" if url else title
-                block = f"### {link}\n\n"
+                gap_link = f"[{gap_title}]({url})" if url else gap_title
+                heading = p.specific_title or gap_title
+                description = p.specific_description or p.gap_entry.description or ""
+
+                block = f"### {heading}\n\n"
+                if description:
+                    block += f"{description}\n\n"
+                block += f"**From gap:** {gap_link}\n\n"
                 block += f"**Why you're a good match:** {p.match_reasoning}\n\n"
                 block += f"**Why this is higher impact:** {p.impact_rationale}\n\n"
                 if p.feasibility_for_researcher:
@@ -215,7 +221,9 @@ class ReportGenerator:
         pivots_text = ""
         if pivot_suggestions:
             pivots_text = "\n".join(
-                f"  {i+1}. {p.gap_entry.title}\n"
+                f"  {i+1}. Gap: {p.gap_entry.title}\n"
+                f"     Specific project: {p.specific_title or '(same as gap)'}\n"
+                f"     Specific description: {p.specific_description or '(none)'}\n"
                 f"     Source: {p.gap_entry.source_url}\n"
                 f"     Relevance: {float(p.relevance_score):.2f}, Impact: {p.impact_potential}\n"
                 f"     Why this matches: {p.match_reasoning}\n"
@@ -292,9 +300,8 @@ KEY CITATIONS:
 Respond with ONLY valid JSON (no markdown code fences) containing these five keys:
 
 1. "novelty_section": Markdown text analyzing whether the question is novel, marginal, or solved.
-   - Include the verdict and score
+   - Include the verdict and reasoning. Do NOT include the score (e.g. 0.4/1), FWCI values, or citation percentiles in the written text—these are shown separately in the UI.
    - When MARGINAL/SOLVED: reference specific papers/literature that have addressed this question
-   - Include FWCI context as secondary information
 
 2. "impact_section": Markdown text for IMPACT ON THE FIELD — how this research affects the discipline, methods, or tools.
    - This is NOT the literature impact — it is the predicted impact of the researcher's own work
@@ -306,7 +313,6 @@ Respond with ONLY valid JSON (no markdown code fences) containing these five key
    - Apply these tests:
      * SCALE: What fraction of 8 billion people are affected? Thousands = LOW, Millions = MEDIUM, Billions = HIGH.
      * TOOLING: Does this create a new method/tool/framework others outside the subfield can use? If not, it cannot be HIGH.
-     * NEWS TEST: Would a non-specialist journalist write about this? If only specialist journals care, it is LOW.
      * COMPARE: Is this comparable to curing a disease, discovering a new material, or preventing famine? If not, do not call it HIGH.
    - Be specific about who benefits, how many people, and to what degree.
    - If real-world impact is LOW, say so clearly. Do not inflate.
@@ -364,19 +370,12 @@ Each section should be self-contained and readable on its own."""
         recommendation: RecommendationType,
     ) -> ReportSections:
         """Build fallback structured sections when LLM is unavailable."""
-        fwci_info = (
-            f"Average FWCI: {novelty.average_fwci:.2f}"
-            if novelty.average_fwci is not None
-            else "FWCI data unavailable"
-        )
-
-        novelty_section = f"""**Verdict: {novelty.verdict}** (Score: {novelty.score}/1.0)
+        novelty_section = f"""**Verdict: {novelty.verdict}**
 
 {novelty.reasoning}
 
 **Literature Context:**
-- Related Papers Found: {novelty.related_papers_count}
-- {fwci_info}"""
+- Related Papers Found: {novelty.related_papers_count}"""
 
         impact_section = f"""**Impact on the field: {novelty.expected_impact_assessment}**
 
@@ -414,7 +413,7 @@ Each section should be self-contained and readable on its own."""
         if recommendation == "CONTINUE":
             verdict_section = (
                 f"**We recommend you continue** your current research direction. "
-                f"The novelty verdict is {novelty.verdict} with a score of {novelty.score:.0%}, "
+                f"The novelty verdict is {novelty.verdict}, "
                 f"and expected impact is {novelty.expected_impact_assessment}. "
                 f"Real-world impact: {rw_level}."
             )
@@ -428,7 +427,7 @@ Each section should be self-contained and readable on its own."""
         else:
             verdict_section = (
                 f"**We are uncertain** about the best path forward. "
-                f"Novelty: {novelty.verdict} (score: {novelty.score:.0%}). "
+                f"Novelty: {novelty.verdict}. "
                 f"Expected impact: {novelty.expected_impact_assessment}. "
                 f"Consider gathering more data or consulting domain experts."
             )

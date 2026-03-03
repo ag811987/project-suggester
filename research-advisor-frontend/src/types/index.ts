@@ -65,6 +65,8 @@ export interface GapMapEntry {
 
 export interface PivotSuggestion {
   gap_entry: GapMapEntry
+  specific_title?: string | null
+  specific_description?: string | null
   relevance_score: number
   impact_potential: ImpactLevel
   match_reasoning: string

@@ -313,14 +313,31 @@ function PivotSection({
 }
 
 function PivotCard({ suggestion }: { suggestion: PivotSuggestion }) {
+  const heading = suggestion.specific_title ?? suggestion.gap_entry.title
+  const description =
+    suggestion.specific_description ?? suggestion.gap_entry.description
+
   return (
     <div className="rounded-lg border bg-white p-4 sm:p-5" data-testid="pivot-card">
       <div className="mb-2 flex items-start justify-between gap-2">
-        <h4 className="text-sm font-semibold sm:text-base">{suggestion.gap_entry.title}</h4>
+        <h4 className="text-sm font-semibold sm:text-base">{heading}</h4>
         <ImpactBadge level={suggestion.impact_potential} />
       </div>
-      <p className="mb-3 text-sm text-gray-600">
-        {suggestion.gap_entry.description}
+      <p className="mb-3 text-sm text-gray-600">{description}</p>
+      <p className="mb-3 text-xs text-gray-500">
+        From gap:{' '}
+        {suggestion.gap_entry.source_url ? (
+          <a
+            href={suggestion.gap_entry.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            {suggestion.gap_entry.title}
+          </a>
+        ) : (
+          suggestion.gap_entry.title
+        )}
       </p>
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
         <span className="rounded bg-gray-100 px-2 py-0.5">
