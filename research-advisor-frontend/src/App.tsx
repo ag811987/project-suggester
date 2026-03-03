@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { ChatInterface } from './components/chat-interface'
 import type { ChatMessage } from './components/chat-interface'
 import { LandingHero } from './components/landing-hero'
@@ -210,6 +211,7 @@ function App() {
           </h1>
         </header>
         <LandingHero onStart={handleStart} />
+        <Analytics />
       </div>
     )
   }
@@ -235,6 +237,7 @@ function App() {
             <ResultsView data={analysisData.result} sessionId={sessionId!} />
           </div>
         </div>
+        <Analytics />
       </div>
     )
   }
@@ -281,6 +284,7 @@ function App() {
           showIntro={step === 0}
         />
       </div>
+      <Analytics />
     </div>
   )
 }
